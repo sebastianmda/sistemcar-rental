@@ -7,7 +7,7 @@ import { RentalStatus } from '../components/StatusBits'
 import HandoverForm from '../components/HandoverForm'
 import ReturnForm from '../components/ReturnForm'
 import RentalDetail from '../components/RentalDetail'
-import { ContractSign, contractStatus } from '../components/Contract'
+import { ContractSign, contractStatus, handoverDone } from '../components/Contract'
 import { contractLabel } from '../lib/contract'
 
 export default function Rentals({ params }) {
@@ -154,7 +154,7 @@ export default function Rentals({ params }) {
             await reload()
             setTab('history')
             setDetailId(id)
-            if (updated?.semnatura_locatar_predare) setSigning({ rental: updated, etapa: 'retur' })
+            if (updated && handoverDone(updated)) setSigning({ rental: updated, etapa: 'retur' })
           }}
         />
       )}

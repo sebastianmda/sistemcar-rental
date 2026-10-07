@@ -4,7 +4,7 @@ import { useToast } from './Toast'
 import { api } from '../lib/api'
 import { friendlyError } from '../lib/errors'
 import { toLocalInput, rentalDays, fmtMoney, fmtDateTime, fmtKm } from '../lib/format'
-import { EQUIPMENT, FEES, FUEL_LEVELS, fuelEighths, fuelLabel } from '../lib/rentalTerms'
+import { EQUIPMENT, FEES, FUEL_LEVELS, SERVICE_NAMES, fuelEighths, fuelLabel } from '../lib/rentalTerms'
 import { Modal, Button, Field, Input, Select, Textarea, FormSection, ErrorText, InfoRow, Card } from './ui'
 import { MediaPicker, UploadProgress } from './Media'
 import { contractLabel } from '../lib/contract'
@@ -182,19 +182,19 @@ export default function ReturnForm({ rental, onClose, onDone }) {
           <MediaPicker files={files} onChange={setFiles} />
         </FormSection>
 
-        <FormSection title="Taxe suplimentare (conform contract)">
+        <FormSection title="Servicii suplimentare facturabile (art. 4 din contract)" description="Sumele sunt fără TVA. Fă poze ca dovadă, apoi tipărește procesul-verbal de constatare din detaliile închirierii.">
           <div className="space-y-2.5">
             <Check checked={form.taxa_curatare} onChange={setFlag('taxa_curatare')}>
-              Curățenie — {fmtMoney(FEES.curatare)}
+              {SERVICE_NAMES.curatare} — {fmtMoney(FEES.curatare)} + TVA
             </Check>
             <Check checked={form.taxa_igienizare} onChange={setFlag('taxa_igienizare')}>
-              Miros persistent / igienizare — {fmtMoney(FEES.igienizare)}
+              {SERVICE_NAMES.igienizare} (miros persistent) — {fmtMoney(FEES.igienizare)} + TVA
             </Check>
             <Check checked={form.realimentare} onChange={setFlag('realimentare')}>
-              Alimentare de către Locator — {fmtMoney(FEES.realimentare)}
+              {SERVICE_NAMES.realimentare} — {fmtMoney(FEES.realimentare)} + TVA, plus combustibilul
             </Check>
             {form.realimentare && (
-              <Field label="Cost combustibil alimentat (RON, opțional)" className="max-w-xs pl-6">
+              <Field label="Contravaloare combustibil (RON fără TVA, din bon)" hint="Valoarea fără TVA de pe bonul de la pompă" className="max-w-xs pl-6">
                 <Input type="number" inputMode="decimal" min={0} value={form.cost_combustibil} onChange={set('cost_combustibil')} />
               </Field>
             )}
@@ -221,7 +221,7 @@ export default function ReturnForm({ rental, onClose, onDone }) {
           <Card className="px-4 py-2">
             <InfoRow label="Zile facturabile">{days}</InfoRow>
             <InfoRow label={`Chirie ${days} × ${fmtMoney(rental.tarif_zilnic)}`}>{fmtMoney(rent)}</InfoRow>
-            {fees > 0 && <InfoRow label="Taxe suplimentare">{fmtMoney(fees)}</InfoRow>}
+            {fees > 0 && <InfoRow label="Servicii suplimentare / penalizări">{fmtMoney(fees)}</InfoRow>}
             <InfoRow label="Total calculat (fără TVA)">
               <span className="text-base">{fmtMoney(computed)}</span>
             </InfoRow>

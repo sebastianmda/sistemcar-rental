@@ -1,6 +1,6 @@
 // Generates the Sistemcar rental contract (+ Anexa 1) as a PDF, filled with the rental's data.
 // The legal text and layout mirror "Contract_inchiriere_SISTEMCAR.docx" (versiunea din 29.09.2026, ora 10:24).
-import { EQUIPMENT, FEES, fuelEighths, splitIdCard } from './rentalTerms'
+import { EQUIPMENT, FEES, SERVICE_NAMES, fuelEighths, splitIdCard } from './rentalTerms'
 import { fmtDate, fmtDateOnly, fmtTime, rentalDays } from './format'
 
 export const DEFAULT_COMPANY = {
@@ -201,9 +201,29 @@ export function buildContractDefinition({ rental, company: companyIn, photoCount
       ' + TVA. Amenzile, taxele de drum, daunele, pierderea cheilor/documentelor și interiorul avariat sunt în sarcina Locatarului.',
     ]),
     P(
-      'Autovehiculul se restituie curat și cu rezervorul la nivelul din Anexa 1. Taxe fixe, dacă este cazul: ' +
-        `curățenie ${FEES.curatare} lei; igienizare pentru miros persistent (fumat, animale) ${FEES.igienizare} lei; ` +
-        `alimentare efectuată de un angajat al Locatorului, dacă rezervorul nu este la nivelul predat, ${FEES.realimentare} lei / alimentare.`
+      'Autovehiculul se restituie în starea de curățenie de la predare și cu rezervorul la nivelul consemnat în Anexa 1. ' +
+        'În caz contrar, Locatorul efectuează, pe seama Locatarului, serviciile de mai jos, care se facturează Locatarului ' +
+        'la următoarele tarife, la care se adaugă TVA:'
+    ),
+    P([
+      'a) curățarea autovehiculului (interior și/sau exterior), dacă este restituit murdar: ',
+      { text: `${FEES.curatare} lei + TVA`, bold: true },
+      ';',
+    ], { margin: [10, 0, 0, 2] }),
+    P([
+      'b) igienizarea și dezodorizarea habitaclului, în caz de miros persistent (fumat, animale etc.): ',
+      { text: `${FEES.igienizare} lei + TVA`, bold: true },
+      ';',
+    ], { margin: [10, 0, 0, 2] }),
+    P([
+      'c) alimentarea autovehiculului până la nivelul de la predare, dacă este restituit cu mai puțin combustibil: ' +
+        'contravaloarea combustibilului alimentat, la prețul din documentul fiscal de achiziție (bon/factură), plus tariful serviciului de alimentare de ',
+      { text: `${FEES.realimentare} lei + TVA`, bold: true },
+      ' / alimentare.',
+    ], { margin: [10, 0, 0, 4] }),
+    P(
+      'Necesitatea acestor servicii se constată la restituire, în Anexa 1 și într-un proces-verbal de constatare, susținut de fotografii. ' +
+        'Refuzul Locatarului de a semna nu împiedică facturarea; în acest caz refuzul se consemnează în procesul-verbal.'
     ),
 
     // ---------- 5 ----------
@@ -328,9 +348,13 @@ export function buildContractDefinition({ rental, company: companyIn, photoCount
     yesNo('Avarii noi:', returned ? Boolean(rental.avarii_noi) : null, returned && rental.avarii_noi ? '— detaliu: vezi observațiile' : `— detaliu: ${blank(36)}`),
     P(['Dotări lipsă: ', returned ? (has(rental.dotari_lipsa) ? val(rental.dotari_lipsa) : { text: 'nu', bold: true }) : blank(60)]),
     photoSet('Set foto retur:', photoCounts.primire || 0, returned && photosKnown),
-    yesNo(`Curățenie ${FEES.curatare} lei:`, returned ? Boolean(rental.taxa_curatare) : null),
-    yesNo(`Miros persistent / igienizare ${FEES.igienizare} lei:`, returned ? Boolean(rental.taxa_igienizare) : null),
-    yesNo(`Alimentare de către Locator ${FEES.realimentare} lei:`, returned ? Boolean(rental.realimentare) : null),
+    yesNo(`Curățare autovehicul (${FEES.curatare} lei + TVA):`, returned ? Boolean(rental.taxa_curatare) : null),
+    yesNo(`Igienizare și dezodorizare (${FEES.igienizare} lei + TVA):`, returned ? Boolean(rental.taxa_igienizare) : null),
+    yesNo(
+      `Alimentare de către Locator (serviciu ${FEES.realimentare} lei + TVA, plus combustibil):`,
+      returned ? Boolean(rental.realimentare) : null,
+      returned && rental.realimentare && Number(rental.cost_combustibil) > 0 ? `— combustibil ${money(rental.cost_combustibil)} lei + TVA` : undefined
+    ),
     twoColumns(
       signBlock('Locator (retur):', rental.semnatura_locator_retur, company.reprezentant, returnDate),
       signBlock('Locatar (predare înapoi):', rental.semnatura_locatar_retur, client.nume, returnDate)
@@ -365,6 +389,187 @@ export function buildContractDefinition({ rental, company: companyIn, photoCount
   }
 }
 
+
+// ---------------------------------------------------------------------------------------------
+// Proces-verbal de constatare la restituire — temeiul pentru facturarea serviciilor suplimentare
+// (curățare, igienizare, alimentare + combustibil) prevăzute la art. 4 din contract.
+// ---------------------------------------------------------------------------------------------
+export function returnReportServices(rental) {
+  const rows = []
+  if (rental.taxa_curatare) rows.push({ name: SERVICE_NAMES.curatare + ' (interior și/sau exterior)', qty: '1', value: FEES.curatare })
+  if (rental.taxa_igienizare) rows.push({ name: SERVICE_NAMES.igienizare + ' (miros persistent)', qty: '1', value: FEES.igienizare })
+  if (rental.realimentare) {
+    rows.push({ name: SERVICE_NAMES.realimentare, qty: '1', value: FEES.realimentare })
+    const fuel = Number(rental.cost_combustibil) || 0
+    rows.push({ name: SERVICE_NAMES.combustibil + ' (conform bonului fiscal)', qty: '—', value: fuel > 0 ? fuel : null })
+  }
+  return rows
+}
+
+export function buildReturnReportDefinition({ rental, company: companyIn, photoCounts = {} }) {
+  const company = { ...DEFAULT_COMPANY, ...(companyIn || {}) }
+  const client = rental.client || {}
+  const vehicle = rental.vehicle || {}
+  const id = splitIdCard(client.act_identitate)
+  const nr = has(rental.numar_contract) ? String(rental.numar_contract).trim() : blank(6)
+  const contractDate = rental.data_contract ? fmtDate(rental.data_contract) : ''
+  const returnDate = rental.data_returnare ? fmtDateOnly(rental.data_returnare) : ''
+  const returnTime = rental.data_returnare ? fmtTime(rental.data_returnare) : ''
+  const fuelOut = fuelEighths(rental.combustibil_predare)
+  const fuelIn = fuelEighths(rental.combustibil_primire)
+  const services = returnReportServices(rental)
+  const known = services.filter((r) => r.value !== null)
+  const total = known.reduce((sum, r) => sum + r.value, 0)
+  const fuelPending = services.some((r) => r.value === null)
+  const photos = photoCounts.primire
+
+  const cell = (text, extra = {}) => ({ text, ...extra })
+  const tableLayout = {
+    hLineWidth: () => 0.5,
+    vLineWidth: () => 0.5,
+    hLineColor: () => LINE,
+    vLineColor: () => LINE,
+    paddingTop: () => 2,
+    paddingBottom: () => 2,
+  }
+
+  const findings = [
+    [cell('Starea de curățenie', { bold: true }), cell(rental.taxa_curatare ? 'Autovehicul restituit murdar — necesită curățare' : 'Corespunzătoare')],
+    [cell('Miros în habitaclu', { bold: true }), cell(rental.taxa_igienizare ? 'Miros persistent (fumat, animale etc.) — necesită igienizare' : 'Fără miros persistent')],
+    [
+      cell('Nivel combustibil', { bold: true }),
+      cell([
+        'la predare ', { text: fuelOut === null ? blank(3) : `${fuelOut}/8`, bold: true },
+        ', la restituire ', { text: fuelIn === null ? blank(3) : `${fuelIn}/8`, bold: true },
+        rental.realimentare ? ' — necesită alimentare' : '',
+      ]),
+    ],
+    [cell('Km la bord', { bold: true }), cell(has(rental.km_primire) ? String(rental.km_primire) : blank(10))],
+    [cell('Avarii noi', { bold: true }), cell(rental.avarii_noi ? 'Da — vezi observațiile' : 'Nu')],
+    [cell('Dotări lipsă', { bold: true }), cell(has(rental.dotari_lipsa) ? rental.dotari_lipsa : 'Nu')],
+    [cell('Observații', { bold: true }), cell(has(rental.observatii_primire) ? nb(rental.observatii_primire) : blank(40))],
+    [cell('Fotografii la restituire', { bold: true }), cell(photos === undefined ? blank(4) : photos > 0 ? `${photos} ${photos === 1 ? 'fotografie păstrată' : 'fotografii păstrate'} de Locator` : 'nu s-au efectuat')],
+  ]
+
+  const serviceRows = services.length
+    ? services.map((r, i) => [
+        cell(String(i + 1)),
+        cell(r.name),
+        cell(r.qty, { alignment: 'center' }),
+        cell(r.value === null ? blank(10) : `${money(r.value)} lei`, { alignment: 'right' }),
+      ])
+    : [[cell('—'), cell('Nu s-au constatat servicii suplimentare de facturat.', { italics: true }), cell(''), cell('')]]
+
+  const content = [
+    { text: company.nume, fontSize: 14, bold: true, color: NAVY, alignment: 'center' },
+    { text: nb(company.adresa), alignment: 'center', fontSize: 8 },
+    { text: `${company.reg_com} · CIF ${company.cif} · Tel. ${company.telefon}`, alignment: 'center', fontSize: 8 },
+    { text: 'PROCES-VERBAL DE CONSTATARE', style: 'title', margin: [0, 10, 0, 0] },
+    { text: 'la restituirea autovehiculului închiriat', alignment: 'center', bold: true, color: NAVY },
+    {
+      text: ['întocmit în baza art. 4 din Contractul de închiriere auto nr. ', { text: String(nr), bold: true }, ' / ', { text: contractDate || blank(14), bold: true }],
+      alignment: 'center',
+      margin: [0, 2, 0, 8],
+    },
+
+    P([
+      'Încheiat astăzi, ', val(returnDate, 12), ', ora ', val(returnTime, 6), ', la ', val(rental.loc_predare || 'sediul Locatorului', 24),
+      ', între:',
+    ]),
+    P(`Locator: ${company.denumire_contract}, CIF ${company.cif}, reprezentată de ${company.reprezentant}, în calitate de ${company.functie}, și`),
+    P(['Locatar: ', val(client.nume, 30), ', CI seria ', val(id.seria, 4), ' nr. ', val(id.nr, 10), ', CNP ', val(client.cnp, 16), '.']),
+
+    H('1. AUTOVEHICULUL'),
+    P(['Marcă/model ', val(vehicle.nume_model, 16), ', nr. înmatriculare ', val(vehicle.inmatriculare, 10), ', VIN ', val(vehicle.vin, 20), '.']),
+    P(['Predat Locatarului la data de ', val(fmtDateOnly(rental.data_predare), 12), ' și restituit Locatorului la data de ', val(returnDate, 12), '.']),
+
+    H('2. CONSTATĂRI LA RESTITUIRE'),
+    P('Părțile au verificat împreună autovehiculul și au constatat următoarele:'),
+    { table: { widths: [120, '*'], body: findings }, layout: tableLayout, fontSize: 8.5, margin: [0, 0, 0, 4] },
+
+    H('3. SERVICII SUPLIMENTARE DE FACTURAT'),
+    P('Ca urmare a constatărilor de mai sus și conform art. 4 din contract, Locatorul efectuează și facturează Locatarului:'),
+    {
+      table: {
+        headerRows: 1,
+        widths: [22, '*', 50, 80],
+        body: [
+          [
+            cell('Nr.', { bold: true, fillColor: FILL }),
+            cell('Serviciu', { bold: true, fillColor: FILL }),
+            cell('Cant.', { bold: true, fillColor: FILL, alignment: 'center' }),
+            cell('Valoare fără TVA', { bold: true, fillColor: FILL, alignment: 'right' }),
+          ],
+          ...serviceRows,
+          ...(services.length
+            ? [[
+                cell(''),
+                cell('TOTAL fără TVA', { bold: true }),
+                cell(''),
+                cell(fuelPending ? `${money(total)} lei + combustibil` : `${money(total)} lei`, { bold: true, alignment: 'right' }),
+              ]]
+            : []),
+        ],
+      },
+      layout: tableLayout,
+      fontSize: 8.5,
+      margin: [0, 0, 0, 3],
+    },
+    {
+      text: 'La valorile de mai sus se adaugă TVA, conform legii. Suma se achită pe baza facturii emise de Locator și poate fi reținută din garanția constituită.',
+      fontSize: 8.5,
+      margin: [0, 0, 0, 6],
+    },
+
+    H('4. DECLARAȚII'),
+    P(
+      'Locatarul a luat cunoștință de constatările de mai sus și de fotografiile efectuate la restituire și ' +
+        'acceptă facturarea serviciilor enumerate la punctul 3.'
+    ),
+    P(['Obiecțiunile Locatarului (dacă există): ', blank(60)]),
+    line([box(false), 'Locatarul a refuzat semnarea prezentului proces-verbal (se completează de Locator).'], [0, 2, 0, 6]),
+    P('Prezentul proces-verbal s-a încheiat în 2 exemplare, câte unul pentru fiecare parte, și face parte integrantă din contract.'),
+
+    twoColumns(
+      {
+        stack: [
+          { text: ['LOCATOR — ', { text: company.nume, bold: false }], bold: true },
+          { text: ['Nume: ', { text: company.reprezentant, bold: true }], margin: [0, 2, 0, 0] },
+          { text: ['Semnătură / ștampilă: ', blank(22)], margin: [0, 14, 0, 0] },
+        ],
+      },
+      {
+        stack: [
+          { text: 'LOCATAR', bold: true },
+          { text: ['Nume: ', val(client.nume, 28)], margin: [0, 2, 0, 0] },
+          { text: ['Semnătură: ', blank(26)], margin: [0, 14, 0, 0] },
+        ],
+      },
+      [0, 6, 0, 0]
+    ),
+  ]
+
+  return {
+    pageSize: 'A4',
+    pageMargins: [48, 34, 48, 40],
+    info: { title: `Proces-verbal constatare ${nr} - ${client.nume || ''}`, author: company.nume },
+    defaultStyle: { font: 'Roboto', fontSize: 9, lineHeight: 1.1, color: TEXT },
+    styles: {
+      title: { fontSize: 14, bold: true, alignment: 'center', color: NAVY },
+      h: { fontSize: 10.5, bold: true, color: NAVY, margin: [0, 6, 0, 3] },
+      p: { margin: [0, 0, 0, 4], alignment: 'justify' },
+    },
+    footer: (page) => ({
+      text: [`${company.nume}  ·  Proces-verbal de constatare  ·  pag. `, { text: String(page), bold: true }],
+      alignment: 'center',
+      fontSize: 7,
+      color: GRAY,
+      margin: [0, 14, 0, 0],
+    }),
+    content,
+  }
+}
+
 let pdfMakePromise = null
 function loadPdfMake() {
   // loaded only when a contract is generated, to keep the app fast
@@ -376,9 +581,16 @@ function loadPdfMake() {
   return pdfMakePromise
 }
 
-export async function contractPdfBlob(args) {
+export function contractPdfBlob(args) {
+  return pdfBlob(buildContractDefinition(args))
+}
+
+export function returnReportPdfBlob(args) {
+  return pdfBlob(buildReturnReportDefinition(args))
+}
+
+async function pdfBlob(definition) {
   const pdfMake = await loadPdfMake()
-  const definition = buildContractDefinition(args)
   return new Promise((resolve, reject) => {
     try {
       pdfMake.createPdf(definition).getBlob((blob) => resolve(blob))
@@ -401,10 +613,10 @@ export function suggestContractNumber(rentals) {
   return max ? String(max + 1) : ''
 }
 
-export function contractFileName(rental) {
+export function contractFileName(rental, prefix = 'Contract') {
   const name = (rental.client?.nume || 'client').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^\w]+/g, '_')
   const nr = String(rental.numar_contract || '').replace(/[^\w-]+/g, '-')
-  return `Contract_${nr ? `${nr}_` : ''}${name}.pdf`
+  return `${prefix}_${nr ? `${nr}_` : ''}${name}.pdf`
 }
 
 // Opens a PDF. `win` is a tab opened synchronously on the click (avoids popup blockers on iPhone).

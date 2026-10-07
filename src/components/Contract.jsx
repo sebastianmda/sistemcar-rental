@@ -1,10 +1,19 @@
 import { useState } from 'react'
-import { FileText, PenLine, Share2, Printer, CheckCircle2, ExternalLink, Hash, Save } from 'lucide-react'
+import { FileText, PenLine, Share2, Printer, CheckCircle2, ExternalLink, Hash, Save, ClipboardCheck } from 'lucide-react'
 import { useData } from '../context/DataContext'
 import { useToast } from './Toast'
 import { api } from '../lib/api'
 import { friendlyError } from '../lib/errors'
-import { contractPdfBlob, contractFileName, showPdf, sharePdf, contractLabel, suggestContractNumber } from '../lib/contract'
+import {
+  contractPdfBlob,
+  contractFileName,
+  showPdf,
+  sharePdf,
+  contractLabel,
+  suggestContractNumber,
+  returnReportPdfBlob,
+  returnReportServices,
+} from '../lib/contract'
 import { fmtDateTime } from '../lib/format'
 import { Modal, Button, Card, Badge, ErrorText, Field, Input } from './ui'
 import SignaturePad from './SignaturePad'
@@ -21,23 +30,38 @@ function useContractTools() {
     return contractPdfBlob({ rental, company, photoCounts })
   }
 
-  // the archived signed PDF if there is one, otherwise a fresh one
-  // (after the return, until the return is signed, a fresh one so it includes the return data)
+  // proces-verbal de constatare la restituire (servicii suplimentare facturabile)
+  const report = async (rental) => {
+    const photoCounts = await api.countMedia(rental.id).catch(() => ({}))
+    return returnReportPdfBlob({ rental, company, photoCounts })
+  }
+
+  // the archived PDF if there is one, otherwise a fresh one
+  // (after the return, until the return is signed / printed, a fresh one so it includes the return data)
   const current = async (rental) => {
-    const archiveUpToDate = rental.status !== 'finalizata' || rental.semnatura_locatar_retur
+    const archiveUpToDate = rental.status !== 'finalizata' || returnDone(rental)
     return rental.contract_pdf && archiveUpToDate ? api.contractBlob(rental.contract_pdf) : generate(rental)
   }
 
-  return { settings, company, generate, current }
+  return { settings, company, generate, current, report }
 }
 
+// a stage counts as done when it was signed on screen OR printed and signed with a pen
+export const handoverDone = (r) => Boolean(r.semnatura_locatar_predare || r.semnat_hartie_predare)
+export const returnDone = (r) => Boolean(r.semnatura_locatar_retur || r.semnat_hartie_retur)
+
 export function contractStatus(rental) {
-  if (rental.semnatura_locatar_retur) return { label: 'Semnat complet', tone: 'green' }
-  if (rental.semnatura_locatar_predare) return { label: 'Semnat la predare', tone: 'blue' }
+  if (returnDone(rental)) return { label: rental.semnatura_locatar_retur ? 'Semnat complet' : 'Semnat pe hârtie', tone: 'green' }
+  if (handoverDone(rental)) {
+    return { label: rental.semnatura_locatar_predare ? 'Semnat la predare' : 'Tipărit pentru semnare', tone: 'blue' }
+  }
   return { label: 'Nesemnat', tone: 'amber' }
 }
 
-// Signing screen: the tenant (and the company) sign on the phone / tablet
+const missingColumn = (err) => /semnat_hartie/.test(String(err?.message || err))
+
+// Contract screen after handover / return.
+// Default: save + print, the parties sign with a pen. Optional: sign on the phone screen.
 export function ContractSign({ rental, etapa, onClose, onSigned }) {
   const toast = useToast()
   const { settings, generate } = useContractTools()
@@ -49,6 +73,7 @@ export function ContractSign({ rental, etapa, onClose, onSigned }) {
   const withNumber = { ...rental, numar_contract: numar.trim() || null, data_contract: dataContract || null }
   const savedLocator = settings?.semnatura_locator || null
 
+  const [onScreen, setOnScreen] = useState(false) // false = paper (default)
   const [clientSig, setClientSig] = useState(null)
   const [useSaved, setUseSaved] = useState(Boolean(savedLocator))
   const [locatorSig, setLocatorSig] = useState(null)
@@ -56,15 +81,46 @@ export function ContractSign({ rental, etapa, onClose, onSigned }) {
   const [agreed, setAgreed] = useState(false)
   const [busy, setBusy] = useState(null)
   const [error, setError] = useState(null)
-  const [done, setDone] = useState(null) // { rental, blob }
+  const [done, setDone] = useState(null) // { rental, blob, paper }
 
   const fileName = contractFileName(rental)
+  const numberFields = () => ({ numar_contract: numar.trim() || null, data_contract: dataContract || null })
 
   const preview = async () => {
     const win = window.open('', '_blank')
     try {
       setBusy('Se generează contractul…')
       showPdf(await generate(withNumber), fileName, win)
+    } catch (err) {
+      win?.close()
+      setError(friendlyError(err))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  // save the number/date, archive the PDF with empty signature lines and open it for printing
+  const saveAndPrint = async () => {
+    setError(null)
+    const win = window.open('', '_blank') // opened right away, otherwise the phone blocks it
+    try {
+      setBusy('Se salvează…')
+      const mark = retur ? { semnat_hartie_retur: new Date().toISOString() } : { semnat_hartie_predare: new Date().toISOString() }
+      let saved
+      try {
+        saved = await api.saveRentalFields(rental.id, { ...numberFields(), ...mark })
+      } catch (err) {
+        if (!missingColumn(err)) throw err
+        saved = await api.saveRentalFields(rental.id, numberFields()) // SUPABASE_UPDATE_V6.sql not run yet
+      }
+      setBusy('Se generează contractul…')
+      const blob = await generate(saved)
+      showPdf(blob, fileName, win)
+      setBusy('Se arhivează contractul…')
+      const archived = await api.uploadContract(saved, blob)
+      toast('Contract salvat. Tipărește-l și semnați cu pixul.')
+      setDone({ rental: archived, blob, paper: true })
+      onSigned?.(archived)
     } catch (err) {
       win?.close()
       setError(friendlyError(err))
@@ -81,10 +137,9 @@ export function ContractSign({ rental, etapa, onClose, onSigned }) {
     if (!agreed) return setError(retur ? 'Confirmă că datele de retur sunt corecte.' : 'Confirmă că locatarul a citit contractul.')
     try {
       setBusy('Se salvează semnăturile…')
-      const numberFields = { numar_contract: numar.trim() || null, data_contract: dataContract || null }
       const fields = retur
-        ? { ...numberFields, semnatura_locatar_retur: clientSig, semnatura_locator_retur: locator }
-        : { ...numberFields, semnatura_locatar_predare: clientSig, semnatura_locator_predare: locator }
+        ? { ...numberFields(), semnatura_locatar_retur: clientSig, semnatura_locator_retur: locator }
+        : { ...numberFields(), semnatura_locatar_predare: clientSig, semnatura_locator_predare: locator }
       const signed = await api.saveRentalFields(rental.id, fields)
       if (!useSaved && rememberLocator && locatorSig) {
         await api.saveSettings({ semnatura_locator: locatorSig }).catch(() => {})
@@ -94,7 +149,7 @@ export function ContractSign({ rental, etapa, onClose, onSigned }) {
       setBusy('Se arhivează contractul…')
       const archived = await api.uploadContract(signed, blob)
       toast('Contract semnat și salvat')
-      setDone({ rental: archived, blob })
+      setDone({ rental: archived, blob, paper: false })
       onSigned?.(archived)
     } catch (err) {
       setError(friendlyError(err))
@@ -103,7 +158,7 @@ export function ContractSign({ rental, etapa, onClose, onSigned }) {
     }
   }
 
-  const title = retur ? 'Semnare retur' : 'Semnare contract'
+  const title = retur ? 'Contract — retur' : 'Contract de închiriere'
 
   if (done) {
     return (
@@ -121,16 +176,32 @@ export function ContractSign({ rental, etapa, onClose, onSigned }) {
         <div className="space-y-4 text-center">
           <CheckCircle2 className="mx-auto h-12 w-12 text-emerald-600" />
           <div>
-            <div className="font-semibold text-slate-900">Contractul a fost semnat</div>
-            <p className="mt-1 text-sm text-slate-500">PDF-ul este salvat la închiriere. Trimite-i clientului exemplarul lui.</p>
+            <div className="font-semibold text-slate-900">{done.paper ? 'Contractul a fost salvat' : 'Contractul a fost semnat'}</div>
+            <p className="mt-1 text-sm text-slate-500">
+              {done.paper
+                ? 'S-a deschis PDF-ul. Tipărește-l (de obicei în 2 exemplare) și semnați amândoi cu pixul. Dacă nu s-a deschis, apasă Tipărește.'
+                : 'PDF-ul este salvat la închiriere. Trimite-i clientului exemplarul lui.'}
+            </p>
           </div>
           <div className="flex flex-col gap-2 sm:flex-row sm:justify-center">
-            <Button icon={Share2} onClick={() => sharePdf(done.blob, fileName)}>
-              Trimite clientului
-            </Button>
-            <Button variant="secondary" icon={ExternalLink} onClick={() => showPdf(done.blob, fileName, window.open('', '_blank'))}>
-              Deschide PDF
-            </Button>
+            {done.paper ? (
+              <Button icon={Printer} onClick={() => showPdf(done.blob, fileName, window.open('', '_blank'))}>
+                Tipărește
+              </Button>
+            ) : (
+              <Button icon={Share2} onClick={() => sharePdf(done.blob, fileName)}>
+                Trimite clientului
+              </Button>
+            )}
+            {done.paper ? (
+              <Button variant="secondary" icon={Share2} onClick={() => sharePdf(done.blob, fileName)}>
+                Trimite / salvează PDF
+              </Button>
+            ) : (
+              <Button variant="secondary" icon={ExternalLink} onClick={() => showPdf(done.blob, fileName, window.open('', '_blank'))}>
+                Deschide PDF
+              </Button>
+            )}
           </div>
         </div>
       </Modal>
@@ -149,9 +220,15 @@ export function ContractSign({ rental, etapa, onClose, onSigned }) {
           <Button variant="secondary" onClick={onClose} disabled={!!busy}>
             Mai târziu
           </Button>
-          <Button icon={PenLine} loading={!!busy} onClick={sign}>
-            Semnează și salvează
-          </Button>
+          {onScreen ? (
+            <Button icon={PenLine} loading={!!busy} onClick={sign}>
+              Semnează și salvează
+            </Button>
+          ) : (
+            <Button icon={Printer} loading={!!busy} onClick={saveAndPrint}>
+              Salvează și tipărește
+            </Button>
+          )}
         </>
       }
     >
@@ -159,8 +236,8 @@ export function ContractSign({ rental, etapa, onClose, onSigned }) {
         <Card className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="text-sm text-slate-600">
             {retur
-              ? 'Anexa 1 a fost completată cu datele de retur. Verifică-le înainte de semnare.'
-              : 'Contractul a fost completat automat. Dă-i clientului să îl citească înainte de semnare.'}
+              ? 'Anexa 1 a fost completată cu datele de retur. Verifică-le înainte de tipărire.'
+              : 'Contractul a fost completat automat din datele predării.'}
           </div>
           <Button variant="secondary" icon={FileText} onClick={preview} disabled={!!busy}>
             Citește contractul
@@ -176,36 +253,54 @@ export function ContractSign({ rental, etapa, onClose, onSigned }) {
           </Field>
         </div>
 
-        <SignaturePad label={`Semnătura locatarului — ${rental.client?.nume ?? ''}`} onChange={setClientSig} />
+        {!onScreen ? (
+          <div className="space-y-3">
+            <p className="rounded-lg bg-slate-50 p-3 text-sm text-slate-700">
+              Se salvează numărul și data, iar contractul se deschide gata de tipărit, cu locurile de semnătură libere.
+              Semnați amândoi cu pixul pe hârtie.
+            </p>
+            <button type="button" onClick={() => setOnScreen(true)} className="text-sm font-medium text-blue-600">
+              Vreau să semnăm pe ecran (cu degetul)
+            </button>
+          </div>
+        ) : (
+          <>
+            <button type="button" onClick={() => setOnScreen(false)} className="text-sm font-medium text-blue-600">
+              ← Înapoi la semnare pe hârtie
+            </button>
 
-        <div>
-          {useSaved ? (
+            <SignaturePad label={`Semnătura locatarului — ${rental.client?.nume ?? ''}`} onChange={setClientSig} />
+
             <div>
-              <div className="mb-1 text-sm font-medium text-slate-700">Semnătura locatorului (Sistemcar)</div>
-              <div className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white p-2">
-                <img src={savedLocator} alt="Semnătura salvată" className="h-16 object-contain" />
-                <Button size="sm" variant="ghost" onClick={() => setUseSaved(false)}>
-                  Semnează acum
-                </Button>
-              </div>
+              {useSaved ? (
+                <div>
+                  <div className="mb-1 text-sm font-medium text-slate-700">Semnătura locatorului (Sistemcar)</div>
+                  <div className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white p-2">
+                    <img src={savedLocator} alt="Semnătura salvată" className="h-16 object-contain" />
+                    <Button size="sm" variant="ghost" onClick={() => setUseSaved(false)}>
+                      Semnează acum
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <SignaturePad label="Semnătura locatorului (Sistemcar)" onChange={setLocatorSig} />
+                  <label className="mt-2 flex items-center gap-2 text-sm text-slate-600">
+                    <input type="checkbox" checked={rememberLocator} onChange={(e) => setRememberLocator(e.target.checked)} className="h-4 w-4" />
+                    Salvează semnătura mea pentru contractele următoare
+                  </label>
+                </>
+              )}
             </div>
-          ) : (
-            <>
-              <SignaturePad label="Semnătura locatorului (Sistemcar)" onChange={setLocatorSig} />
-              <label className="mt-2 flex items-center gap-2 text-sm text-slate-600">
-                <input type="checkbox" checked={rememberLocator} onChange={(e) => setRememberLocator(e.target.checked)} className="h-4 w-4" />
-                Salvează semnătura mea pentru contractele următoare
-              </label>
-            </>
-          )}
-        </div>
 
-        <label className="flex items-start gap-2.5 rounded-lg bg-slate-50 p-3 text-sm text-slate-700">
-          <input type="checkbox" checked={agreed} onChange={(e) => setAgreed(e.target.checked)} className="mt-0.5 h-4 w-4 shrink-0" />
-          {retur
-            ? 'Părțile confirmă datele de retur consemnate în Anexa 1 (km, combustibil, avarii, dotări, taxe).'
-            : 'Locatarul a citit contractul și Anexa 1 și este de acord cu prevederile acestora.'}
-        </label>
+            <label className="flex items-start gap-2.5 rounded-lg bg-slate-50 p-3 text-sm text-slate-700">
+              <input type="checkbox" checked={agreed} onChange={(e) => setAgreed(e.target.checked)} className="mt-0.5 h-4 w-4 shrink-0" />
+              {retur
+                ? 'Părțile confirmă datele de retur consemnate în Anexa 1 (km, combustibil, avarii, dotări, taxe).'
+                : 'Locatarul a citit contractul și Anexa 1 și este de acord cu prevederile acestora.'}
+            </label>
+          </>
+        )}
 
         <UploadProgress text={busy} />
         <ErrorText>{error}</ErrorText>
@@ -273,13 +368,28 @@ function ContractNumberEditor({ rental, onClose, onSaved }) {
 // Contract box shown in the rental details
 export function ContractCard({ rental, onSign, onChanged }) {
   const toast = useToast()
-  const { current, generate } = useContractTools()
+  const { current, report } = useContractTools()
   const [busy, setBusy] = useState(null)
   const [editingNumber, setEditingNumber] = useState(false)
   const status = contractStatus(rental)
   const fileName = contractFileName(rental)
-  const needsHandover = rental.status !== 'anulata' && !rental.semnatura_locatar_predare
-  const needsReturn = rental.status === 'finalizata' && rental.semnatura_locatar_predare && !rental.semnatura_locatar_retur
+  const needsHandover = rental.status !== 'anulata' && !handoverDone(rental)
+  const needsReturn = rental.status === 'finalizata' && handoverDone(rental) && !returnDone(rental)
+  const returned = rental.status === 'finalizata'
+  const hasServices = returned && returnReportServices(rental).length > 0
+  const reportName = contractFileName(rental, 'Proces-verbal_constatare')
+
+  const openReport = () => {
+    const win = window.open('', '_blank')
+    return run('report', async () => {
+      try {
+        showPdf(await report(rental), reportName, win)
+      } catch (err) {
+        win?.close()
+        throw err
+      }
+    })
+  }
 
   const run = async (label, fn) => {
     setBusy(label)
@@ -297,18 +407,6 @@ export function ContractCard({ rental, onSign, onChanged }) {
     return run('open', async () => {
       try {
         showPdf(await current(rental), fileName, win)
-      } catch (err) {
-        win?.close()
-        throw err
-      }
-    })
-  }
-
-  const printBlank = () => {
-    const win = window.open('', '_blank')
-    return run('print', async () => {
-      try {
-        showPdf(await generate(rental), fileName, win)
       } catch (err) {
         win?.close()
         throw err
@@ -334,17 +432,17 @@ export function ContractCard({ rental, onSign, onChanged }) {
       </div>
       <div className="mt-4 flex flex-wrap gap-2">
         {needsHandover && (
-          <Button size="sm" icon={PenLine} onClick={() => onSign('predare')}>
-            Semnează contractul
+          <Button size="sm" icon={Printer} onClick={() => onSign('predare')}>
+            Contract: salvează și tipărește
           </Button>
         )}
         {needsReturn && (
-          <Button size="sm" icon={PenLine} onClick={() => onSign('retur')}>
-            Semnează returul
+          <Button size="sm" icon={Printer} onClick={() => onSign('retur')}>
+            Retur: salvează și tipărește
           </Button>
         )}
         <Button size="sm" variant="secondary" icon={ExternalLink} loading={busy === 'open'} onClick={open}>
-          Deschide PDF
+          Deschide / tipărește PDF
         </Button>
         <Button
           size="sm"
@@ -355,15 +453,20 @@ export function ContractCard({ rental, onSign, onChanged }) {
         >
           Trimite
         </Button>
-        {needsHandover && (
-          <Button size="sm" variant="ghost" icon={Printer} loading={busy === 'print'} onClick={printBlank}>
-            Pentru semnare pe hârtie
+        {returned && (
+          <Button size="sm" variant={hasServices ? 'primary' : 'secondary'} icon={ClipboardCheck} loading={busy === 'report'} onClick={openReport}>
+            Proces-verbal de constatare
           </Button>
         )}
         <Button size="sm" variant="ghost" icon={Hash} onClick={() => setEditingNumber(true)}>
           Nr. și dată
         </Button>
       </div>
+      {hasServices && (
+        <p className="mt-3 text-xs text-slate-500">
+          Ai servicii suplimentare de facturat. Tipărește procesul-verbal, semnați-l și păstrează-l împreună cu factura și pozele de la retur.
+        </p>
+      )}
       {editingNumber && (
         <ContractNumberEditor
           rental={rental}

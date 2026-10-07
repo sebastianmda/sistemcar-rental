@@ -219,6 +219,8 @@ alter table public.rentals add column if not exists semnatura_locatar_retur   te
 alter table public.rentals add column if not exists semnatura_locator_retur   text;
 alter table public.rentals add column if not exists contract_pdf           text;
 alter table public.rentals add column if not exists contract_semnat_la     timestamptz;
+alter table public.rentals add column if not exists semnat_hartie_predare  timestamptz;
+alter table public.rentals add column if not exists semnat_hartie_retur    timestamptz;
 
 -- Setări: datele firmei, semnătura/ștampila salvată, numărul de pornire al contractelor
 alter table public.settings add column if not exists date_firma        jsonb;

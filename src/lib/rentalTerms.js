@@ -1,9 +1,18 @@
 // Values that come from the Sistemcar rental contract (keep in sync with the contract text)
 
+// tarife fără TVA (art. 4 din contract); la facturare se adaugă TVA
 export const FEES = {
-  curatare: 500, // taxă curățare auto
-  igienizare: 250, // taxă igienizare (miros persistent)
-  realimentare: 200, // taxă realimentare (+ cost efectiv combustibil)
+  curatare: 500, // serviciu de curățare a autovehiculului
+  igienizare: 250, // serviciu de igienizare și dezodorizare (miros persistent)
+  realimentare: 200, // serviciu de alimentare (+ contravaloarea combustibilului, separat)
+}
+
+// denumirile serviciilor, la fel în contract, în formularul de primire și în procesul-verbal
+export const SERVICE_NAMES = {
+  curatare: 'Servicii de curățare a autovehiculului',
+  igienizare: 'Servicii de igienizare și dezodorizare a habitaclului',
+  realimentare: 'Serviciu de alimentare cu combustibil',
+  combustibil: 'Contravaloare combustibil alimentat',
 }
 
 // Anexa 1 — equipment checklist, in the contract's order
