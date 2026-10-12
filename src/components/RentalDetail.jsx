@@ -10,6 +10,7 @@ import { MediaGallery } from './Media'
 import { ContractCard } from './Contract'
 import { contractLabel } from '../lib/contract'
 import { fuelLabel, FEES } from '../lib/rentalTerms'
+import { clientName, contractPerson, isCompany } from '../lib/party'
 
 export default function RentalDetail({ rental, onClose, onReturn, onChanged, onSign, onRefresh }) {
   const toast = useToast()
@@ -81,7 +82,13 @@ export default function RentalDetail({ rental, onClose, onReturn, onChanged, onS
         <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
           <Card className="p-4">
             <h4 className="mb-2 text-sm font-semibold text-slate-500">Client</h4>
-            <div className="font-semibold text-slate-900">{rental.client?.nume}</div>
+            <div className="font-semibold text-slate-900">{clientName(rental.client)}</div>
+            {isCompany(rental.client) && (
+              <div className="text-sm text-slate-600">
+                CUI {rental.client.cui || '—'}
+                {contractPerson(rental).nume ? ` · delegat: ${contractPerson(rental).nume}` : ''}
+              </div>
+            )}
             {rental.client?.telefon && (
               <a href={`tel:${rental.client.telefon}`} className="mt-1 flex items-center gap-1.5 text-sm text-blue-600">
                 <Phone className="h-3.5 w-3.5" /> {rental.client.telefon}

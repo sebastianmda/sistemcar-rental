@@ -4,6 +4,7 @@ import { useData } from '../context/DataContext'
 import { fmtMoney, fmtDateTime, fmtDateOnly } from '../lib/format'
 import { Button, Card, PageHeader, Plate, cx } from '../components/ui'
 import { RentalStatus } from '../components/StatusBits'
+import { clientName } from '../lib/party'
 
 const LEVEL_STYLE = {
   expired: { icon: ShieldX, box: 'bg-red-50 text-red-600', label: 'Expirat', pill: 'bg-red-600 text-white' },
@@ -132,7 +133,7 @@ export default function Dashboard({ navigate }) {
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <Plate>{r.vehicle?.inmatriculare}</Plate>
-                      <span className="truncate text-sm font-medium text-slate-900">{r.client?.nume}</span>
+                      <span className="truncate text-sm font-medium text-slate-900">{clientName(r.client)}</span>
                     </div>
                     <div className="mt-1 text-xs text-slate-500">Retur: {fmtDateTime(r.data_returnare_planificata)}</div>
                   </div>

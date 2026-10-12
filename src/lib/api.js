@@ -13,7 +13,41 @@ const VEHICLE_NUMBERS = ['an_fabricatie', 'capacitate_pasageri', 'km_actuali', '
 const CLIENT_FIELDS = [
   'nume', 'telefon', 'email', 'cnp', 'act_identitate', 'adresa',
   'permis_numar', 'permis_categorie', 'permis_expira', 'firma', 'cui', 'observatii',
+  'tip_client', 'reg_com', 'sediu',
 ]
+
+const DELEGATE_FIELDS = [
+  'delegat_nume', 'delegat_cnp', 'delegat_act', 'delegat_telefon',
+  'delegat_permis_numar', 'delegat_permis_categorie', 'delegat_permis_expira', 'delegatie',
+]
+
+// a firm's client must have a not-null `nume`; without a delegate name the firm name is used
+function clientPayload(data) {
+  const out = clean(data, CLIENT_FIELDS)
+  if (out.tip_client !== 'PJ') {
+    out.reg_com = null
+    out.sediu = null
+  }
+  if (!out.nume && out.firma) out.nume = out.firma
+  return out
+}
+
+const missingNewColumn = (err) => /tip_client|reg_com|sediu|delegat/.test(String(err?.message || ''))
+
+// persoană fizică: works even before SUPABASE_UPDATE_V7.sql was run (the new columns are dropped)
+async function saveClient(data, write) {
+  const payload = clientPayload(data)
+  try {
+    return await run(write(payload))
+  } catch (err) {
+    if (payload.tip_client === 'PJ' || !missingNewColumn(err)) {
+      if (missingNewColumn(err)) throw new Error('Pentru clienți persoane juridice rulează întâi SUPABASE_UPDATE_V7.sql în Supabase.')
+      throw err
+    }
+    const { tip_client, reg_com, sediu, ...rest } = payload
+    return run(write(rest))
+  }
+}
 
 // keeps only known columns; empty strings become null (empty dates used to crash inserts)
 function clean(data, fields, numbers = []) {
@@ -40,7 +74,7 @@ async function run(query) {
 
 const RENTAL_SELECT =
   '*, vehicle:vehicles(id, nume_model, inmatriculare, km_actuali, an_fabricatie, vin), ' +
-  'client:clients(id, nume, telefon, email, cnp, act_identitate, adresa, permis_numar, permis_categorie, permis_expira)'
+  'client:clients(*)'
 
 export const api = {
   // ---------- vehicles ----------
@@ -76,11 +110,11 @@ export const api = {
   },
 
   createClient(data) {
-    return run(supabase.from('clients').insert(clean(data, CLIENT_FIELDS)).select().single())
+    return saveClient(data, (payload) => supabase.from('clients').insert(payload).select().single())
   },
 
   updateClient(id, data) {
-    return run(supabase.from('clients').update(clean(data, CLIENT_FIELDS)).eq('id', id).select().single())
+    return saveClient(data, (payload) => supabase.from('clients').update(payload).eq('id', id).select().single())
   },
 
   deleteClient(id) {
@@ -114,6 +148,7 @@ export const api = {
           dotari_predare: data.dotari_predare || null,
           numar_contract: data.numar_contract?.trim() || null,
           data_contract: data.data_contract || null,
+          ...(data.delegat ? clean(data.delegat, DELEGATE_FIELDS) : {}),
         })
         .select(RENTAL_SELECT)
         .single()

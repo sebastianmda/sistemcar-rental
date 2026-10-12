@@ -2,6 +2,7 @@
 // The legal text and layout mirror "Contract_inchiriere_SISTEMCAR.docx" (versiunea din 29.09.2026, ora 10:24).
 import { EQUIPMENT, FEES, SERVICE_NAMES, fuelEighths, splitIdCard } from './rentalTerms'
 import { fmtDate, fmtDateOnly, fmtTime, rentalDays } from './format'
+import { clientName, contractPerson, isCompany } from './party'
 
 export const DEFAULT_COMPANY = {
   nume: 'SISTEMCAR SRL',
@@ -105,7 +106,9 @@ export function buildContractDefinition({ rental, company: companyIn, photoCount
   const company = { ...DEFAULT_COMPANY, ...(companyIn || {}) }
   const client = rental.client || {}
   const vehicle = rental.vehicle || {}
-  const id = splitIdCard(client.act_identitate)
+  const pj = isCompany(client)
+  const person = contractPerson(rental) // client (PF) or the firm's delegate (PJ)
+  const id = splitIdCard(person.act)
   const returned = rental.status === 'finalizata'
   // number and date are typed in by the user; if missing they stay as lines to fill in by hand
   const contractDate = rental.data_contract ? fmtDate(rental.data_contract) : ''
@@ -152,15 +155,37 @@ export function buildContractDefinition({ rental, company: companyIn, photoCount
       `Locator: ${company.denumire_contract}, sediul în ${company.sediu_contract}, ${company.reg_com}, CIF ${company.cif}, ` +
         `reprezentată de ${company.reprezentant} în calitate de ${company.functie}.`
     ),
-    P(['Locatar: Nume ', val(client.nume, 32), ' domiciliu ', val(client.adresa, 32)]),
-    P([
-      'CI seria ', val(id.seria, 4), ' nr. ', val(id.nr, 10), ' CNP ', val(client.cnp, 18),
-      ' tel. ', val(client.telefon, 14), ' e-mail ', val(client.email, 20),
-    ]),
-    P([
-      'Permis categoria ', val(client.permis_categorie, 4), ' nr. ', val(client.permis_numar, 10),
-      ' valabil până la ', val(client.permis_expira ? fmtDate(client.permis_expira) : '', 10),
-    ]),
+    ...(pj
+      ? [
+          P([
+            'Locatar: ', val(client.firma, 24), ', cu sediul în ', val(client.sediu, 32), ', Nr. Reg. Com. ', val(client.reg_com, 14),
+            ', CUI ', val(client.cui, 12), ', tel. ', val(client.telefon, 14), ', e-mail ', val(client.email, 20), ',',
+          ]),
+          P([
+            'reprezentată prin delegat: Nume ', val(person.nume, 28), ', CI seria ', val(id.seria, 4), ' nr. ', val(id.nr, 10),
+            ', CNP ', val(person.cnp, 18), ', tel. ', val(person.telefon, 14),
+            ', în baza delegației / împuternicirii nr. ', val(person.delegatie, 14), '.',
+          ]),
+          P([
+            'Permis delegat categoria ', val(person.permis_categorie, 4), ' nr. ', val(person.permis_numar, 10),
+            ' valabil până la ', val(person.permis_expira ? fmtDate(person.permis_expira) : '', 10), '.',
+          ]),
+          P(
+            'Delegatul este persoana căreia i se predă autovehiculul și care îl conduce în numele Locatarului. ' +
+              'Locatarul (persoana juridică) răspunde pentru toate obligațiile din prezentul contract.'
+          ),
+        ]
+      : [
+          P(['Locatar: Nume ', val(person.nume, 32), ' domiciliu ', val(person.adresa, 32)]),
+          P([
+            'CI seria ', val(id.seria, 4), ' nr. ', val(id.nr, 10), ' CNP ', val(person.cnp, 18),
+            ' tel. ', val(person.telefon, 14), ' e-mail ', val(person.email, 20),
+          ]),
+          P([
+            'Permis categoria ', val(person.permis_categorie, 4), ' nr. ', val(person.permis_numar, 10),
+            ' valabil până la ', val(person.permis_expira ? fmtDate(person.permis_expira) : '', 10),
+          ]),
+        ]),
     P(['Șofer autorizat suplimentar (dacă e cazul): ', val(rental.sofer2_nume, 32), ' permis nr. ', val(rental.sofer2_permis, 10)]),
 
     // ---------- 2 ----------
@@ -276,8 +301,16 @@ export function buildContractDefinition({ rental, company: companyIn, photoCount
           {
             stack: [
               { text: 'LOCATAR', bold: true },
-              { text: ['Nume: ', val(client.nume, 28)], margin: [0, 2, 0, 0] },
-              { text: 'Semnătură:', margin: [0, 6, 0, 0] },
+              ...(pj
+                ? [
+                    { text: val(client.firma, 24), margin: [0, 2, 0, 0] },
+                    { text: ['prin delegat, Nume: ', val(person.nume, 24)] },
+                    { text: 'Semnătură / ștampilă:', margin: [0, 6, 0, 0] },
+                  ]
+                : [
+                    { text: ['Nume: ', val(person.nume, 28)], margin: [0, 2, 0, 0] },
+                    { text: 'Semnătură:', margin: [0, 6, 0, 0] },
+                  ]),
               signatureImage(rental.semnatura_locatar_predare),
               { text: ['Data: ', val(signDate, 14)] },
             ],
@@ -334,7 +367,7 @@ export function buildContractDefinition({ rental, company: companyIn, photoCount
     },
     twoColumns(
       signBlock('Locator (predare):', rental.semnatura_locator_predare, company.reprezentant),
-      signBlock('Locatar (primire):', rental.semnatura_locatar_predare, client.nume)
+      signBlock(pj ? 'Locatar (primire), prin delegat:' : 'Locatar (primire):', rental.semnatura_locatar_predare, person.nume)
     ),
 
     H('2. RETUR de la Locatar'),
@@ -357,7 +390,7 @@ export function buildContractDefinition({ rental, company: companyIn, photoCount
     ),
     twoColumns(
       signBlock('Locator (retur):', rental.semnatura_locator_retur, company.reprezentant, returnDate),
-      signBlock('Locatar (predare înapoi):', rental.semnatura_locatar_retur, client.nume, returnDate)
+      signBlock(pj ? 'Locatar (predare înapoi), prin delegat:' : 'Locatar (predare înapoi):', rental.semnatura_locatar_retur, person.nume, returnDate)
     ),
     {
       text: 'Anexa 1 face parte integrantă din contract. Predarea și returul se semnează pe loc, la datele de mai sus.',
@@ -371,7 +404,7 @@ export function buildContractDefinition({ rental, company: companyIn, photoCount
   return {
     pageSize: 'A4',
     pageMargins: [50, 44, 50, 44],
-    info: { title: `Contract ${nr} - ${client.nume || ''}`, author: company.nume },
+    info: { title: `Contract ${nr} - ${clientName(client)}`, author: company.nume },
     defaultStyle: { font: 'Roboto', fontSize: 9.5, lineHeight: 1.15, color: TEXT },
     styles: {
       title: { fontSize: 14, bold: true, alignment: 'center', color: NAVY },
@@ -410,7 +443,9 @@ export function buildReturnReportDefinition({ rental, company: companyIn, photoC
   const company = { ...DEFAULT_COMPANY, ...(companyIn || {}) }
   const client = rental.client || {}
   const vehicle = rental.vehicle || {}
-  const id = splitIdCard(client.act_identitate)
+  const pj = isCompany(client)
+  const person = contractPerson(rental)
+  const id = splitIdCard(person.act)
   const nr = has(rental.numar_contract) ? String(rental.numar_contract).trim() : blank(6)
   const contractDate = rental.data_contract ? fmtDate(rental.data_contract) : ''
   const returnDate = rental.data_returnare ? fmtDateOnly(rental.data_returnare) : ''
@@ -477,7 +512,12 @@ export function buildReturnReportDefinition({ rental, company: companyIn, photoC
       ', între:',
     ]),
     P(`Locator: ${company.denumire_contract}, CIF ${company.cif}, reprezentată de ${company.reprezentant}, în calitate de ${company.functie}, și`),
-    P(['Locatar: ', val(client.nume, 30), ', CI seria ', val(id.seria, 4), ' nr. ', val(id.nr, 10), ', CNP ', val(client.cnp, 16), '.']),
+    pj
+      ? P([
+          'Locatar: ', val(client.firma, 24), ', CUI ', val(client.cui, 12), ', prin delegat ', val(person.nume, 24),
+          ', CI seria ', val(id.seria, 4), ' nr. ', val(id.nr, 10), ', CNP ', val(person.cnp, 16), '.',
+        ])
+      : P(['Locatar: ', val(person.nume, 30), ', CI seria ', val(id.seria, 4), ' nr. ', val(id.nr, 10), ', CNP ', val(person.cnp, 16), '.']),
 
     H('1. AUTOVEHICULUL'),
     P(['Marcă/model ', val(vehicle.nume_model, 16), ', nr. înmatriculare ', val(vehicle.inmatriculare, 10), ', VIN ', val(vehicle.vin, 20), '.']),
@@ -540,9 +580,9 @@ export function buildReturnReportDefinition({ rental, company: companyIn, photoC
       },
       {
         stack: [
-          { text: 'LOCATAR', bold: true },
-          { text: ['Nume: ', val(client.nume, 28)], margin: [0, 2, 0, 0] },
-          { text: ['Semnătură: ', blank(26)], margin: [0, 14, 0, 0] },
+          pj ? { text: ['LOCATAR — ', { text: client.firma || '', bold: false }], bold: true } : { text: 'LOCATAR', bold: true },
+          { text: [pj ? 'Delegat: ' : 'Nume: ', val(person.nume, 28)], margin: [0, 2, 0, 0] },
+          { text: [pj ? 'Semnătură / ștampilă: ' : 'Semnătură: ', blank(pj ? 20 : 26)], margin: [0, 14, 0, 0] },
         ],
       },
       [0, 6, 0, 0]
@@ -552,7 +592,7 @@ export function buildReturnReportDefinition({ rental, company: companyIn, photoC
   return {
     pageSize: 'A4',
     pageMargins: [48, 34, 48, 40],
-    info: { title: `Proces-verbal constatare ${nr} - ${client.nume || ''}`, author: company.nume },
+    info: { title: `Proces-verbal constatare ${nr} - ${clientName(client)}`, author: company.nume },
     defaultStyle: { font: 'Roboto', fontSize: 9, lineHeight: 1.1, color: TEXT },
     styles: {
       title: { fontSize: 14, bold: true, alignment: 'center', color: NAVY },
@@ -614,7 +654,7 @@ export function suggestContractNumber(rentals) {
 }
 
 export function contractFileName(rental, prefix = 'Contract') {
-  const name = (rental.client?.nume || 'client').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^\w]+/g, '_')
+  const name = (clientName(rental.client) || 'client').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^\w]+/g, '_')
   const nr = String(rental.numar_contract || '').replace(/[^\w-]+/g, '-')
   return `${prefix}_${nr ? `${nr}_` : ''}${name}.pdf`
 }

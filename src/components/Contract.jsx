@@ -19,6 +19,7 @@ import { Modal, Button, Card, Badge, ErrorText, Field, Input } from './ui'
 import SignaturePad from './SignaturePad'
 import { UploadProgress } from './Media'
 import { DateInput } from './DateInputs'
+import { clientName, contractPerson, isCompany } from '../lib/party'
 
 function useContractTools() {
   const { settings } = useData()
@@ -213,7 +214,7 @@ export function ContractSign({ rental, etapa, onClose, onSigned }) {
       open
       onClose={busy ? undefined : onClose}
       title={title}
-      subtitle={`${rental.client?.nume ?? ''} · ${rental.vehicle?.nume_model ?? ''} ${rental.vehicle?.inmatriculare ?? ''}`}
+      subtitle={`${clientName(rental.client)} · ${rental.vehicle?.nume_model ?? ''} ${rental.vehicle?.inmatriculare ?? ''}`}
       size="lg"
       footer={
         <>
@@ -269,7 +270,14 @@ export function ContractSign({ rental, etapa, onClose, onSigned }) {
               ← Înapoi la semnare pe hârtie
             </button>
 
-            <SignaturePad label={`Semnătura locatarului — ${rental.client?.nume ?? ''}`} onChange={setClientSig} />
+            <SignaturePad
+              label={
+                isCompany(rental.client)
+                  ? `Semnătura delegatului — ${contractPerson(rental).nume ?? ''} (${clientName(rental.client)})`
+                  : `Semnătura locatarului — ${clientName(rental.client)}`
+              }
+              onChange={setClientSig}
+            />
 
             <div>
               {useSaved ? (

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { KeyRound, AlertTriangle } from 'lucide-react'
 import { useData } from '../context/DataContext'
 import { useToast } from './Toast'
@@ -7,7 +7,8 @@ import { friendlyError } from '../lib/errors'
 import { vehicleDocs } from '../lib/alerts'
 import { toLocalInput, addDays, rentalDays, fmtMoney, daysLabel, daysUntil, fmtDate } from '../lib/format'
 import { Modal, Button, Field, Input, Select, Textarea, FormSection, ErrorText, Tabs } from './ui'
-import ClientFields, { EMPTY_CLIENT, validateClient } from './ClientFields'
+import ClientFields, { EMPTY_CLIENT, validateClient, DelegateFields } from './ClientFields'
+import { clientName, defaultDelegate, EMPTY_DELEGATE, isCompany } from '../lib/party'
 import { MediaPicker, UploadProgress } from './Media'
 
 import { EQUIPMENT, FUEL_LEVELS, defaultEquipment } from '../lib/rentalTerms'
@@ -19,6 +20,15 @@ const CONTRACT_CLIENT_FIELDS = [
   ['act_identitate', 'seria/nr. buletin'],
   ['adresa', 'domiciliu'],
   ['permis_numar', 'nr. permis'],
+]
+const CONTRACT_COMPANY_FIELDS = [
+  ['cui', 'CUI'],
+  ['sediu', 'sediul firmei'],
+]
+const CONTRACT_DELEGATE_FIELDS = [
+  ['delegat_cnp', 'CNP delegat'],
+  ['delegat_act', 'buletin delegat'],
+  ['delegat_permis_numar', 'permis delegat'],
 ]
 
 export function EquipmentChecklist({ value, onChange, keys }) {
@@ -81,6 +91,7 @@ export default function HandoverForm({ initialVehicleId, onClose, onDone }) {
   const [clientId, setClientId] = useState('')
   const [clientSearch, setClientSearch] = useState('')
   const [newClient, setNewClient] = useState({ ...EMPTY_CLIENT })
+  const [delegate, setDelegate] = useState({ ...EMPTY_DELEGATE })
   const [files, setFiles] = useState([])
   const [saving, setSaving] = useState(false)
   const [progress, setProgress] = useState(null)
@@ -104,14 +115,26 @@ export default function HandoverForm({ initialVehicleId, onClose, onDone }) {
 
   const filteredClients = useMemo(() => {
     const q = clientSearch.trim().toLowerCase()
-    return clients.filter((c) => !q || c.nume.toLowerCase().includes(q) || (c.telefon || '').includes(q))
+    return clients.filter((c) =>
+      !q || [c.nume, c.firma, c.cui, c.telefon].some((v) => v && String(v).toLowerCase().includes(q))
+    )
   }, [clients, clientSearch])
   const selectedClient = clients.find((c) => c.id === clientId)
-  const licenseDays = daysUntil(clientMode === 'existing' ? selectedClient?.permis_expira : newClient.permis_expira)
   const contractClient = clientMode === 'existing' ? selectedClient : newClient
-  const missingForContract = contractClient
-    ? CONTRACT_CLIENT_FIELDS.filter(([k]) => !String(contractClient[k] || '').trim()).map(([, label]) => label)
-    : []
+  const company = isCompany(contractClient)
+
+  // existing firm chosen: its usual delegate is filled in, and can be changed for this rental
+  useEffect(() => {
+    if (clientMode === 'existing' && isCompany(selectedClient)) setDelegate(defaultDelegate(selectedClient))
+  }, [clientMode, selectedClient])
+
+  const licenseDays = daysUntil(company ? delegate.delegat_permis_expira : contractClient?.permis_expira)
+  const missing = (obj, fields) => fields.filter(([k]) => !String(obj?.[k] || '').trim()).map(([, label]) => label)
+  const missingForContract = !contractClient
+    ? []
+    : company
+      ? [...missing(contractClient, CONTRACT_COMPANY_FIELDS), ...missing(delegate, CONTRACT_DELEGATE_FIELDS)]
+      : missing(contractClient, CONTRACT_CLIENT_FIELDS)
 
   const submit = async () => {
     setError(null)
@@ -122,6 +145,8 @@ export default function HandoverForm({ initialVehicleId, onClose, onDone }) {
       const problem = validateClient(newClient)
       if (problem) return setError(problem)
     }
+    if (company && !delegate.delegat_nume.trim()) return setError('Completează numele delegatului care primește mașina.')
+    if (company && delegate.delegat_cnp && !/^\d{13}$/.test(delegate.delegat_cnp.trim())) return setError('CNP-ul delegatului trebuie să aibă 13 cifre.')
     if (!form.data_predare || !form.data_returnare_planificata)
       return setError('Completează data și ora predării și a returnării (ex: 27.09.2026 și 14:30).')
     if (new Date(form.data_returnare_planificata) <= new Date(form.data_predare))
@@ -134,12 +159,24 @@ export default function HandoverForm({ initialVehicleId, onClose, onDone }) {
         cid = createdClientId
         if (!cid) {
           setProgress('Se salvează clientul…')
-          cid = (await api.createClient(newClient)).id
+          // a new firm keeps this delegate as its usual one for next time
+          const data = company
+            ? {
+                ...newClient,
+                nume: delegate.delegat_nume,
+                cnp: delegate.delegat_cnp,
+                act_identitate: delegate.delegat_act,
+                permis_numar: delegate.delegat_permis_numar,
+                permis_categorie: delegate.delegat_permis_categorie,
+                permis_expira: delegate.delegat_permis_expira,
+              }
+            : newClient
+          cid = (await api.createClient(data)).id
           setCreatedClientId(cid)
         }
       }
       setProgress('Se salvează predarea…')
-      const rental = await api.createRental({ ...form, client_id: cid })
+      const rental = await api.createRental({ ...form, client_id: cid, delegat: company ? delegate : null })
       if (files.length) {
         const failed = await api.uploadMany(rental.id, 'predare', files, (i, n) => setProgress(`Se încarcă pozele ${i}/${n}…`))
         if (failed.length) toast(`${failed.length} poză(e) nu s-au încărcat. Le poți adăuga din detaliile închirierii.`, 'error')
@@ -233,12 +270,13 @@ export default function HandoverForm({ initialVehicleId, onClose, onDone }) {
           />
           {clientMode === 'existing' ? (
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <Input value={clientSearch} onChange={(e) => setClientSearch(e.target.value)} placeholder="Caută nume sau telefon…" />
+              <Input value={clientSearch} onChange={(e) => setClientSearch(e.target.value)} placeholder="Caută nume, firmă sau telefon…" />
               <Select value={clientId} onChange={(e) => setClientId(e.target.value)}>
                 <option value="">— alege clientul —</option>
                 {filteredClients.map((c) => (
                   <option key={c.id} value={c.id}>
-                    {c.nume} {c.telefon ? `· ${c.telefon}` : ''}
+                    {clientName(c)}
+                    {isCompany(c) ? ' (firmă)' : ''} {c.telefon ? `· ${c.telefon}` : ''}
                   </option>
                 ))}
               </Select>
@@ -246,8 +284,9 @@ export default function HandoverForm({ initialVehicleId, onClose, onDone }) {
           ) : (
             <ClientFields form={newClient} setForm={setNewClient} compact />
           )}
+          {company && <DelegateFields value={delegate} onChange={setDelegate} />}
           {licenseDays !== null && licenseDays < 0 && (
-            <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">Atenție: permisul clientului este expirat.</div>
+            <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">Atenție: permisul {company ? 'delegatului' : 'clientului'} este expirat.</div>
           )}
           {(clientMode === 'new' || selectedClient) && missingForContract.length > 0 && (
             <div className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">

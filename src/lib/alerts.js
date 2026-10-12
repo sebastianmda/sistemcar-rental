@@ -1,4 +1,5 @@
 import { daysUntil, daysLabel, fmtDate, fmtDateTime } from './format'
+import { clientName } from './party'
 
 export const DOCUMENTS = [
   { key: 'rca_expira', label: 'RCA', required: true },
@@ -64,7 +65,7 @@ export function computeAlerts(vehicles, rentals) {
         level: 'overdue',
         rental,
         title: `Returnare întârziată · ${name}`,
-        detail: `Trebuia returnată la ${fmtDateTime(rental.data_returnare_planificata)} — ${rental.client?.nume ?? ''}`,
+        detail: `Trebuia returnată la ${fmtDateTime(rental.data_returnare_planificata)} — ${clientName(rental.client)}`,
         days: -1,
       })
     } else if (hours <= 24) {
@@ -74,7 +75,7 @@ export function computeAlerts(vehicles, rentals) {
         level: 'warning',
         rental,
         title: `Returnare în următoarele 24h · ${name}`,
-        detail: `${fmtDateTime(rental.data_returnare_planificata)} — ${rental.client?.nume ?? ''}`,
+        detail: `${fmtDateTime(rental.data_returnare_planificata)} — ${clientName(rental.client)}`,
         days: 0,
       })
     }

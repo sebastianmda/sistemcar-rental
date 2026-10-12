@@ -9,6 +9,7 @@ import ReturnForm from '../components/ReturnForm'
 import RentalDetail from '../components/RentalDetail'
 import { ContractSign, contractStatus, handoverDone } from '../components/Contract'
 import { contractLabel } from '../lib/contract'
+import { clientName } from '../lib/party'
 
 export default function Rentals({ params }) {
   const { rentals, reload } = useData()
@@ -37,7 +38,7 @@ export default function Rentals({ params }) {
     const q = query.trim().toLowerCase()
     if (!q) return source
     return source.filter((r) =>
-      [r.vehicle?.nume_model, r.vehicle?.inmatriculare, r.client?.nume, r.client?.telefon].some(
+      [r.vehicle?.nume_model, r.vehicle?.inmatriculare, r.client?.nume, r.client?.firma, r.delegat_nume, r.client?.telefon].some(
         (v) => v && v.toLowerCase().includes(q)
       )
     )
@@ -97,7 +98,7 @@ export default function Rentals({ params }) {
               </div>
               <div className="mt-3 space-y-1.5 text-sm">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="font-medium text-slate-800">{r.client?.nume}</span>
+                  <span className="font-medium text-slate-800">{clientName(r.client)}</span>
                   {r.client?.telefon && (
                     <a href={`tel:${r.client.telefon}`} className="inline-flex items-center gap-1 text-blue-600">
                       <Phone className="h-3.5 w-3.5" /> {r.client.telefon}

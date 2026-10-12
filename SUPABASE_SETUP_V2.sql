@@ -221,6 +221,17 @@ alter table public.rentals add column if not exists contract_pdf           text;
 alter table public.rentals add column if not exists contract_semnat_la     timestamptz;
 alter table public.rentals add column if not exists semnat_hartie_predare  timestamptz;
 alter table public.rentals add column if not exists semnat_hartie_retur    timestamptz;
+alter table public.clients add column if not exists tip_client text not null default 'PF';
+alter table public.clients add column if not exists reg_com    text;
+alter table public.clients add column if not exists sediu      text;
+alter table public.rentals add column if not exists delegat_nume             text;
+alter table public.rentals add column if not exists delegat_cnp              text;
+alter table public.rentals add column if not exists delegat_act              text;
+alter table public.rentals add column if not exists delegat_telefon          text;
+alter table public.rentals add column if not exists delegat_permis_numar     text;
+alter table public.rentals add column if not exists delegat_permis_categorie text;
+alter table public.rentals add column if not exists delegat_permis_expira    date;
+alter table public.rentals add column if not exists delegatie                text;
 
 -- Setări: datele firmei, semnătura/ștampila salvată, numărul de pornire al contractelor
 alter table public.settings add column if not exists date_firma        jsonb;

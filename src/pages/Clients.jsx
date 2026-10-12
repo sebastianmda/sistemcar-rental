@@ -7,6 +7,7 @@ import { friendlyError } from '../lib/errors'
 import { fmtDate, daysUntil, plural } from '../lib/format'
 import { Button, Card, PageHeader, SearchInput, EmptyState, Modal, ErrorText, Badge } from '../components/ui'
 import ClientFields, { clientToForm, validateClient } from '../components/ClientFields'
+import { clientName, isCompany } from '../lib/party'
 
 function ClientForm({ client, onClose, onSaved }) {
   const toast = useToast()
@@ -71,7 +72,7 @@ export default function Clients() {
     const q = query.trim().toLowerCase()
     if (!q) return clients
     return clients.filter((c) =>
-      [c.nume, c.telefon, c.email, c.firma, c.cnp].some((v) => v && String(v).toLowerCase().includes(q))
+      [c.nume, c.telefon, c.email, c.firma, c.cui, c.cnp].some((v) => v && String(v).toLowerCase().includes(q))
     )
   }, [clients, query])
 
@@ -80,7 +81,7 @@ export default function Clients() {
       toast('Clientul are închirieri în istoric și nu poate fi șters.', 'error')
       return
     }
-    if (!confirm(`Ștergi clientul ${c.nume}?`)) return
+    if (!confirm(`Ștergi clientul ${clientName(c)}?`)) return
     try {
       await api.deleteClient(c.id)
       toast('Client șters')
@@ -117,8 +118,15 @@ export default function Clients() {
               <div key={c.id} className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center">
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-semibold text-slate-900">{c.nume}</span>
-                    {c.firma && <Badge tone="blue">{c.firma}</Badge>}
+                    <span className="font-semibold text-slate-900">{clientName(c)}</span>
+                    {isCompany(c) ? (
+                      <>
+                        <Badge tone="blue">Firmă{c.cui ? ` · CUI ${c.cui}` : ''}</Badge>
+                        {c.nume && c.nume !== c.firma && <span className="text-sm text-slate-500">delegat: {c.nume}</span>}
+                      </>
+                    ) : (
+                      c.firma && <Badge tone="blue">{c.firma}</Badge>
+                    )}
                     {licenseDays !== null && licenseDays < 0 && <Badge tone="red">Permis expirat</Badge>}
                     {licenseDays !== null && licenseDays >= 0 && licenseDays <= 30 && (
                       <Badge tone="amber">Permis expiră {fmtDate(c.permis_expira)}</Badge>

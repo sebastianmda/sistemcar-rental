@@ -9,6 +9,7 @@ import { Modal, Button, Field, Input, Select, Textarea, FormSection, ErrorText, 
 import { MediaPicker, UploadProgress } from './Media'
 import { contractLabel } from '../lib/contract'
 import { DateInput, DateTimeInput } from './DateInputs'
+import { clientName } from '../lib/party'
 
 function Check({ checked, onChange, children }) {
   return (
@@ -110,7 +111,7 @@ export default function ReturnForm({ rental, onClose, onDone }) {
       open
       onClose={saving ? undefined : onClose}
       title="Primire mașină"
-      subtitle={`Contract ${contractLabel(rental)} · ${rental.vehicle?.inmatriculare ?? ''} — ${rental.client?.nume ?? ''}`}
+      subtitle={`Contract ${contractLabel(rental)} · ${rental.vehicle?.inmatriculare ?? ''} — ${clientName(rental.client)}`}
       size="xl"
       footer={
         <>

@@ -12,6 +12,9 @@ export function friendlyError(err) {
   if (code === '23503') return 'Nu se poate șterge: există închirieri asociate.'
   if (code === '22007' || code === '22008') return 'Una dintre date este invalidă.'
   if (code === '42501' || msg.includes('row-level security')) return 'Nu ai drepturi pentru această acțiune. Deconectează-te și intră din nou.'
+  if ((code === 'PGRST204' || code === '42703') && /tip_client|reg_com|sediu|delegat/.test(msg)) {
+    return 'Baza de date nu este actualizată pentru firme. Rulează SUPABASE_UPDATE_V7.sql în Supabase.'
+  }
   if (code === 'PGRST204' || code === 'PGRST205' || code === '42P01' || code === '42703') {
     return 'Baza de date nu este actualizată. Rulează scriptul SUPABASE_SETUP_V2.sql în Supabase.'
   }
