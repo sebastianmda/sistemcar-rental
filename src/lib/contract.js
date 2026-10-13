@@ -205,6 +205,11 @@ export function buildContractDefinition({ rental, company: companyIn, photoCount
       ' zile.',
     ]),
     P(
+      'În cazul în care autovehiculul este închiriat ca autovehicul de înlocuire pe durata instrumentării unui dosar de daună, ' +
+        'durata convenită este estimativă și depinde de instrumentarea dosarului de daună. Locatarul are obligația să restituie ' +
+        'autovehiculul în cel mult 24 de ore de la anunțarea de către Locator.'
+    ),
+    P(
       'La expirarea duratei convenite, dacă autovehiculul nu a fost restituit, închirierea se prelungește de drept, zi cu zi, la același tarif, ' +
         'până la restituirea efectivă sau până la împlinirea a 30 de zile de la predare. Pentru continuarea închirierii peste 30 de zile este ' +
         'necesar acordul scris al Locatorului, inclusiv prin SMS sau e-mail.'
