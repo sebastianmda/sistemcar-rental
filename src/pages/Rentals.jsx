@@ -6,6 +6,7 @@ import { Button, Card, PageHeader, EmptyState, Tabs, Plate, SearchInput, Badge }
 import { RentalStatus } from '../components/StatusBits'
 import HandoverForm from '../components/HandoverForm'
 import ReturnForm from '../components/ReturnForm'
+import HandoverEditForm from '../components/HandoverEditForm'
 import RentalDetail from '../components/RentalDetail'
 import { ContractSign, contractStatus, handoverDone } from '../components/Contract'
 import { contractLabel } from '../lib/contract'
@@ -19,6 +20,8 @@ export default function Rentals({ params }) {
   const [returning, setReturning] = useState(null)
   const [detailId, setDetailId] = useState(null)
   const [signing, setSigning] = useState(null) // { rental, etapa }
+  const [editingReturn, setEditingReturn] = useState(null)
+  const [editingHandover, setEditingHandover] = useState(null)
 
   useEffect(() => {
     if (params?.newForVehicle || params?.newRental) setHandover({ vehicleId: params.newForVehicle })
@@ -160,12 +163,37 @@ export default function Rentals({ params }) {
         />
       )}
 
-      {detail && !returning && !signing && (
+      {editingReturn && (
+        <ReturnForm
+          rental={editingReturn}
+          editing
+          onClose={() => setEditingReturn(null)}
+          onDone={async () => {
+            setEditingReturn(null)
+            await reload()
+          }}
+        />
+      )}
+
+      {editingHandover && (
+        <HandoverEditForm
+          rental={editingHandover}
+          onClose={() => setEditingHandover(null)}
+          onDone={async () => {
+            setEditingHandover(null)
+            await reload()
+          }}
+        />
+      )}
+
+      {detail && !returning && !signing && !editingReturn && !editingHandover && (
         <RentalDetail
           rental={detail}
           onClose={() => setDetailId(null)}
           onReturn={() => setReturning(detail)}
           onSign={(etapa) => setSigning({ rental: detail, etapa })}
+          onEditHandover={() => setEditingHandover(detail)}
+          onEditReturn={() => setEditingReturn(detail)}
           onRefresh={reload}
           onChanged={async () => {
             setDetailId(null)

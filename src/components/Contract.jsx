@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { FileText, PenLine, Share2, Printer, CheckCircle2, ExternalLink, Hash, Save, ClipboardCheck } from 'lucide-react'
+import { FileText, PenLine, Share2, Printer, CheckCircle2, ExternalLink, Hash, Save, ClipboardCheck, Pencil } from 'lucide-react'
 import { useData } from '../context/DataContext'
 import { useToast } from './Toast'
 import { api } from '../lib/api'
@@ -45,6 +45,16 @@ function useContractTools() {
   }
 
   return { settings, company, generate, current, report }
+}
+
+// after a correction: the archived contract PDF is rebuilt with the new data (signatures kept)
+export function useArchiveRefresh() {
+  const { generate } = useContractTools()
+  return async (rental) => {
+    if (!rental?.contract_pdf) return rental
+    const blob = await generate(rental)
+    return api.uploadContract(rental, blob)
+  }
 }
 
 // a stage counts as done when it was signed on screen OR printed and signed with a pen
@@ -374,7 +384,7 @@ function ContractNumberEditor({ rental, onClose, onSaved }) {
 }
 
 // Contract box shown in the rental details
-export function ContractCard({ rental, onSign, onChanged }) {
+export function ContractCard({ rental, onSign, onChanged, onEditHandover, onEditReturn }) {
   const toast = useToast()
   const { current, report } = useContractTools()
   const [busy, setBusy] = useState(null)
@@ -464,6 +474,16 @@ export function ContractCard({ rental, onSign, onChanged }) {
         {returned && (
           <Button size="sm" variant={hasServices ? 'primary' : 'secondary'} icon={ClipboardCheck} loading={busy === 'report'} onClick={openReport}>
             Proces-verbal de constatare
+          </Button>
+        )}
+        {onEditHandover && (
+          <Button size="sm" variant="secondary" icon={Pencil} onClick={onEditHandover}>
+            Editează predarea
+          </Button>
+        )}
+        {returned && onEditReturn && (
+          <Button size="sm" variant="secondary" icon={Pencil} onClick={onEditReturn}>
+            Editează returul
           </Button>
         )}
         <Button size="sm" variant="ghost" icon={Hash} onClick={() => setEditingNumber(true)}>

@@ -159,6 +159,57 @@ export const api = {
     return rental
   },
 
+  // corrects a return that was already saved: rental fields only, the car's status is left alone;
+  // the car's km follows only if it still shows the old return km (no newer handover since)
+  async updateReturn(rental, data) {
+    const updated = await run(
+      supabase
+        .from('rentals')
+        .update({
+          data_returnare: new Date(data.data_returnare).toISOString(),
+          km_primire: data.km_primire === '' ? null : Number(data.km_primire),
+          combustibil_primire: data.combustibil_primire || null,
+          observatii_primire: data.observatii_primire?.trim() || null,
+          total_final: Number(data.total_final) || 0,
+          zile_facturabile: Number(data.zile_facturabile) || null,
+          avarii_noi: Boolean(data.avarii_noi),
+          dotari_lipsa: data.dotari_lipsa?.trim() || null,
+          taxa_curatare: Boolean(data.taxa_curatare),
+          taxa_igienizare: Boolean(data.taxa_igienizare),
+          realimentare: Boolean(data.realimentare),
+          cost_combustibil: data.realimentare ? Number(data.cost_combustibil) || 0 : 0,
+        })
+        .eq('id', rental.id)
+        .select(RENTAL_SELECT)
+        .single()
+    )
+    const oldKm = rental.km_primire
+    if (updated.km_primire !== null && oldKm !== null && rental.vehicle?.km_actuali === oldKm && oldKm !== updated.km_primire) {
+      await run(supabase.from('vehicles').update({ km_actuali: updated.km_primire, updated_at: new Date().toISOString() }).eq('id', rental.vehicle_id))
+    }
+    return updated
+  },
+
+  // corrects the handover data of a rental
+  updateHandover(rental, data) {
+    const fields = {
+      data_predare: new Date(data.data_predare).toISOString(),
+      data_returnare_planificata: new Date(data.data_returnare_planificata).toISOString(),
+      tarif_zilnic: Number(data.tarif_zilnic) || 0,
+      garantie: Number(data.garantie) || 0,
+      km_predare: data.km_predare === '' ? null : Number(data.km_predare),
+      combustibil_predare: data.combustibil_predare || null,
+      observatii_predare: data.observatii_predare?.trim() || null,
+      loc_predare: data.loc_predare?.trim() || 'sediul Locatorului',
+      sofer2_nume: data.sofer2_nume?.trim() || null,
+      sofer2_permis: data.sofer2_permis?.trim() || null,
+      nr_chei: data.nr_chei === '' || data.nr_chei === null ? null : Number(data.nr_chei),
+      dotari_predare: data.dotari_predare || null,
+      ...(data.delegat ? clean(data.delegat, DELEGATE_FIELDS) : {}),
+    }
+    return run(supabase.from('rentals').update(fields).eq('id', rental.id).select(RENTAL_SELECT).single())
+  },
+
   async finishRental(rental, data) {
     const updated = await run(
       supabase

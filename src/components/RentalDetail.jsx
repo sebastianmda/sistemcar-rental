@@ -12,7 +12,7 @@ import { contractLabel } from '../lib/contract'
 import { fuelLabel, FEES } from '../lib/rentalTerms'
 import { clientName, contractPerson, isCompany } from '../lib/party'
 
-export default function RentalDetail({ rental, onClose, onReturn, onChanged, onSign, onRefresh }) {
+export default function RentalDetail({ rental, onClose, onReturn, onChanged, onSign, onRefresh, onEditHandover, onEditReturn }) {
   const toast = useToast()
   const [media, setMedia] = useState(null)
   const [mediaError, setMediaError] = useState(null)
@@ -77,7 +77,7 @@ export default function RentalDetail({ rental, onClose, onReturn, onChanged, onS
           <LicenseWarning client={rental.client} />
         </div>
 
-        {rental.status !== 'anulata' && <ContractCard rental={rental} onSign={onSign} onChanged={onRefresh} />}
+        {rental.status !== 'anulata' && <ContractCard rental={rental} onSign={onSign} onChanged={onRefresh} onEditHandover={onEditHandover} onEditReturn={onEditReturn} />}
 
         <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
           <Card className="p-4">

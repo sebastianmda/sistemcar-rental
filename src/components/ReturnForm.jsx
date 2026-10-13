@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react'
-import { CheckCircle2 } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { CheckCircle2, Save } from 'lucide-react'
 import { useToast } from './Toast'
 import { api } from '../lib/api'
 import { friendlyError } from '../lib/errors'
@@ -10,6 +10,7 @@ import { MediaPicker, UploadProgress } from './Media'
 import { contractLabel } from '../lib/contract'
 import { DateInput, DateTimeInput } from './DateInputs'
 import { clientName } from '../lib/party'
+import { useArchiveRefresh } from './Contract'
 
 function Check({ checked, onChange, children }) {
   return (
@@ -25,27 +26,58 @@ function Check({ checked, onChange, children }) {
   )
 }
 
-export default function ReturnForm({ rental, onClose, onDone }) {
+// editing an already saved return: the form starts from the saved values
+function savedReturn(rental, handedOver) {
+  const missing = String(rental.dotari_lipsa || '')
+    .split(',')
+    .map((x) => x.trim())
+    .filter(Boolean)
+  const known = handedOver.map((e) => e.label)
+  const calendarDays = rentalDays(rental.data_predare, rental.data_returnare)
+  return {
+    data_returnare: toLocalInput(rental.data_returnare),
+    km_primire: rental.km_primire ?? '',
+    combustibil_primire: fuelEighths(rental.combustibil_primire) !== null ? `${fuelEighths(rental.combustibil_primire)}/8` : '8/8',
+    observatii_primire: rental.observatii_primire || '',
+    avarii_noi: Boolean(rental.avarii_noi),
+    prezente: Object.fromEntries(handedOver.map((e) => [e.key, !missing.includes(e.label)])),
+    alte_lipsuri: missing.filter((m) => !known.includes(m)).join(', '),
+    taxa_curatare: Boolean(rental.taxa_curatare),
+    taxa_igienizare: Boolean(rental.taxa_igienizare),
+    realimentare: Boolean(rental.realimentare),
+    cost_combustibil: rental.realimentare && Number(rental.cost_combustibil) ? String(rental.cost_combustibil) : '',
+    penalizare: '',
+    zi_extra: Number(rental.zile_facturabile) > calendarDays,
+    trimite_service: false,
+  }
+}
+
+export default function ReturnForm({ rental, editing = false, onClose, onDone }) {
   const toast = useToast()
+  const refreshArchive = useArchiveRefresh()
   const handedOver = EQUIPMENT.filter((e) => rental.dotari_predare?.[e.key])
   const startFuel = fuelEighths(rental.combustibil_predare)
 
-  const [form, setForm] = useState({
-    data_returnare: toLocalInput(new Date()),
-    km_primire: rental.km_predare ?? '',
-    combustibil_primire: startFuel !== null ? `${startFuel}/8` : '8/8',
-    observatii_primire: '',
-    avarii_noi: false,
-    prezente: Object.fromEntries(handedOver.map((e) => [e.key, true])),
-    alte_lipsuri: '',
-    taxa_curatare: false,
-    taxa_igienizare: false,
-    realimentare: false,
-    cost_combustibil: '',
-    penalizare: '',
-    zi_extra: false,
-    trimite_service: false,
-  })
+  const [form, setForm] = useState(() =>
+    editing
+      ? savedReturn(rental, handedOver)
+      : {
+          data_returnare: toLocalInput(new Date()),
+          km_primire: rental.km_predare ?? '',
+          combustibil_primire: startFuel !== null ? `${startFuel}/8` : '8/8',
+          observatii_primire: '',
+          avarii_noi: false,
+          prezente: Object.fromEntries(handedOver.map((e) => [e.key, true])),
+          alte_lipsuri: '',
+          taxa_curatare: false,
+          taxa_igienizare: false,
+          realimentare: false,
+          cost_combustibil: '',
+          penalizare: '',
+          zi_extra: false,
+          trimite_service: false,
+        }
+  )
   const [totalOverride, setTotalOverride] = useState(null)
   const [files, setFiles] = useState([])
   const [saving, setSaving] = useState(false)
@@ -66,6 +98,11 @@ export default function ReturnForm({ rental, onClose, onDone }) {
     (form.realimentare ? FEES.realimentare + (Number(form.cost_combustibil) || 0) : 0) +
     (Number(form.penalizare) || 0)
   const computed = rent + fees
+  // editing: keep the saved total if it was set by hand (discount, penalty) — it can be recalculated with one tap
+  useEffect(() => {
+    if (editing && Number(rental.total_final) !== computed) setTotalOverride(Number(rental.total_final) || 0)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const total = totalOverride ?? computed
 
   const kmDriven =
@@ -85,18 +122,18 @@ export default function ReturnForm({ rental, onClose, onDone }) {
     if (new Date(form.data_returnare) < new Date(rental.data_predare)) return setError('Data primirii este înaintea predării.')
     setSaving(true)
     try {
-      setProgress('Se salvează primirea…')
-      const updated = await api.finishRental(rental, {
-        ...form,
-        dotari_lipsa: missing,
-        zile_facturabile: days,
-        total_final: total,
-      })
+      setProgress(editing ? 'Se salvează modificările…' : 'Se salvează primirea…')
+      const data = { ...form, dotari_lipsa: missing, zile_facturabile: days, total_final: total }
+      let updated = editing ? await api.updateReturn(rental, data) : await api.finishRental(rental, data)
       if (files.length) {
         const failed = await api.uploadMany(rental.id, 'primire', files, (i, n) => setProgress(`Se încarcă pozele ${i}/${n}…`))
         if (failed.length) toast(`${failed.length} poză(e) nu s-au încărcat. Le poți adăuga din detaliile închirierii.`, 'error')
       }
-      toast('Mașina a fost primită')
+      if (editing && updated.contract_pdf) {
+        setProgress('Se actualizează contractul arhivat…')
+        updated = await refreshArchive(updated).catch(() => updated)
+      }
+      toast(editing ? 'Returul a fost corectat' : 'Mașina a fost primită')
       onDone(updated)
     } catch (err) {
       setError(friendlyError(err))
@@ -110,7 +147,7 @@ export default function ReturnForm({ rental, onClose, onDone }) {
     <Modal
       open
       onClose={saving ? undefined : onClose}
-      title="Primire mașină"
+      title={editing ? 'Editează returul' : 'Primire mașină'}
       subtitle={`Contract ${contractLabel(rental)} · ${rental.vehicle?.inmatriculare ?? ''} — ${clientName(rental.client)}`}
       size="xl"
       footer={
@@ -118,13 +155,19 @@ export default function ReturnForm({ rental, onClose, onDone }) {
           <Button variant="secondary" onClick={onClose} disabled={saving}>
             Anulează
           </Button>
-          <Button icon={CheckCircle2} loading={saving} onClick={submit}>
-            Confirmă primirea
+          <Button icon={editing ? Save : CheckCircle2} loading={saving} onClick={submit}>
+            {editing ? 'Salvează modificările' : 'Confirmă primirea'}
           </Button>
         </>
       }
     >
       <div className="space-y-8">
+        {editing && (
+          <div className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            Corectezi un retur deja salvat. După salvare, contractul arhivat se reface cu datele noi. Dacă ați semnat deja Anexa 1 pe
+            hârtie cu datele greșite, tipărește-o din nou și semnați-o.
+          </div>
+        )}
         <Card className="bg-slate-50 px-4 py-2">
           <InfoRow label="Predată la">{fmtDateTime(rental.data_predare)}</InfoRow>
           <InfoRow label="Km la predare">{fmtKm(rental.km_predare)}</InfoRow>
@@ -236,9 +279,16 @@ export default function ReturnForm({ rental, onClose, onDone }) {
               onChange={(e) => setTotalOverride(e.target.value === '' ? '' : Number(e.target.value))}
             />
           </Field>
-          <Check checked={form.trimite_service} onChange={setFlag('trimite_service')}>
-            Trimite mașina în service după retur
-          </Check>
+          {editing && totalOverride !== null && totalOverride !== computed && (
+            <button type="button" onClick={() => setTotalOverride(null)} className="text-sm font-medium text-blue-600">
+              Folosește totalul calculat ({fmtMoney(computed)})
+            </button>
+          )}
+          {!editing && (
+            <Check checked={form.trimite_service} onChange={setFlag('trimite_service')}>
+              Trimite mașina în service după retur
+            </Check>
+          )}
         </FormSection>
 
         <UploadProgress text={progress} />
