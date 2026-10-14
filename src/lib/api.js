@@ -6,8 +6,26 @@ const BUCKET = 'rental-media'
 const VEHICLE_FIELDS = [
   'nume_model', 'inmatriculare', 'vin', 'an_fabricatie', 'culoare', 'capacitate_pasageri',
   'tip_combustibil', 'cutie_viteze', 'km_actuali', 'status', 'tarif_zilnic',
-  'rca_expira', 'itp_expira', 'rovinieta_expira', 'casco_expira', 'observatii',
+  'rca_expira', 'itp_expira', 'rovinieta_expira', 'casco_expira', 'observatii', 'casco_fransiza',
 ]
+
+// columns added by later SQL updates: if the update was not run yet, the save is retried without them
+const LATE_COLUMNS = ['casco_fransiza', 'casco']
+async function tolerant(payload, write) {
+  try {
+    return await run(write(payload))
+  } catch (err) {
+    const msg = String(err?.message || '')
+    const missing = LATE_COLUMNS.filter((c) => msg.includes(`'${c}'`) || msg.includes(`.${c}`) || msg.includes(`"${c}"`))
+    if (!missing.length || !(err.code === 'PGRST204' || err.code === '42703')) throw err
+    const rest = { ...payload }
+    missing.forEach((c) => delete rest[c])
+    return tolerant(rest, write)
+  }
+}
+
+const casco = (data) =>
+  data.casco === undefined ? {} : { casco: data.casco === null ? null : Boolean(data.casco), casco_fransiza: data.casco ? data.casco_fransiza?.trim() || null : null }
 const VEHICLE_NUMBERS = ['an_fabricatie', 'capacitate_pasageri', 'km_actuali', 'tarif_zilnic']
 
 const CLIENT_FIELDS = [
@@ -88,14 +106,14 @@ export const api = {
     const row = clean(data, VEHICLE_FIELDS, VEHICLE_NUMBERS)
     row.inmatriculare = row.inmatriculare?.toUpperCase()
     row.status = row.status || 'Disponibil'
-    return run(supabase.from('vehicles').insert(row).select().single())
+    return tolerant(row, (r) => supabase.from('vehicles').insert(r).select().single())
   },
 
   updateVehicle(id, data) {
     const row = clean(data, VEHICLE_FIELDS, VEHICLE_NUMBERS)
     if (row.inmatriculare) row.inmatriculare = row.inmatriculare.toUpperCase()
     row.updated_at = new Date().toISOString()
-    return run(supabase.from('vehicles').update(row).eq('id', id).select().single())
+    return tolerant(row, (r) => supabase.from('vehicles').update(r).eq('id', id).select().single())
   },
 
   archiveVehicle(id) {
@@ -127,32 +145,28 @@ export const api = {
   },
 
   async createRental(data) {
-    const rental = await run(
-      supabase
-        .from('rentals')
-        .insert({
-          vehicle_id: data.vehicle_id,
-          client_id: data.client_id,
-          status: 'activa',
-          data_predare: new Date(data.data_predare).toISOString(),
-          data_returnare_planificata: new Date(data.data_returnare_planificata).toISOString(),
-          tarif_zilnic: Number(data.tarif_zilnic) || 0,
-          garantie: Number(data.garantie) || 0,
-          km_predare: data.km_predare === '' ? null : Number(data.km_predare),
-          combustibil_predare: data.combustibil_predare || null,
-          observatii_predare: data.observatii_predare?.trim() || null,
-          loc_predare: data.loc_predare?.trim() || 'sediul Locatorului',
-          sofer2_nume: data.sofer2_nume?.trim() || null,
-          sofer2_permis: data.sofer2_permis?.trim() || null,
-          nr_chei: data.nr_chei === '' ? null : Number(data.nr_chei),
-          dotari_predare: data.dotari_predare || null,
-          numar_contract: data.numar_contract?.trim() || null,
-          data_contract: data.data_contract || null,
-          ...(data.delegat ? clean(data.delegat, DELEGATE_FIELDS) : {}),
-        })
-        .select(RENTAL_SELECT)
-        .single()
-    )
+    const payload = {
+      vehicle_id: data.vehicle_id,
+      client_id: data.client_id,
+      status: 'activa',
+      data_predare: new Date(data.data_predare).toISOString(),
+      data_returnare_planificata: new Date(data.data_returnare_planificata).toISOString(),
+      tarif_zilnic: Number(data.tarif_zilnic) || 0,
+      garantie: Number(data.garantie) || 0,
+      km_predare: data.km_predare === '' ? null : Number(data.km_predare),
+      combustibil_predare: data.combustibil_predare || null,
+      observatii_predare: data.observatii_predare?.trim() || null,
+      loc_predare: data.loc_predare?.trim() || 'sediul Locatorului',
+      sofer2_nume: data.sofer2_nume?.trim() || null,
+      sofer2_permis: data.sofer2_permis?.trim() || null,
+      nr_chei: data.nr_chei === '' ? null : Number(data.nr_chei),
+      dotari_predare: data.dotari_predare || null,
+      numar_contract: data.numar_contract?.trim() || null,
+      data_contract: data.data_contract || null,
+      ...(data.delegat ? clean(data.delegat, DELEGATE_FIELDS) : {}),
+      ...casco(data),
+    }
+    const rental = await tolerant(payload, (p) => supabase.from('rentals').insert(p).select(RENTAL_SELECT).single())
     const vehicleUpdate = { status: 'În chirie', updated_at: new Date().toISOString() }
     if (rental.km_predare !== null) vehicleUpdate.km_actuali = rental.km_predare
     await run(supabase.from('vehicles').update(vehicleUpdate).eq('id', data.vehicle_id))
@@ -206,8 +220,9 @@ export const api = {
       nr_chei: data.nr_chei === '' || data.nr_chei === null ? null : Number(data.nr_chei),
       dotari_predare: data.dotari_predare || null,
       ...(data.delegat ? clean(data.delegat, DELEGATE_FIELDS) : {}),
+      ...casco(data),
     }
-    return run(supabase.from('rentals').update(fields).eq('id', rental.id).select(RENTAL_SELECT).single())
+    return tolerant(fields, (f) => supabase.from('rentals').update(f).eq('id', rental.id).select(RENTAL_SELECT).single())
   },
 
   async finishRental(rental, data) {

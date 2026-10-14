@@ -31,6 +31,7 @@ const EMPTY = {
   itp_expira: '',
   rovinieta_expira: '',
   casco_expira: '',
+  casco_fransiza: '',
   observatii: '',
 }
 
@@ -266,6 +267,9 @@ export default function VehicleForm({ vehicle, photoUrl, defaultTariff, onClose,
             </Field>
             <Field label="CASCO valabil până la" hint="Opțional">
               <DateInput value={form.casco_expira} onChange={set('casco_expira')} />
+            </Field>
+            <Field label="Franșiză CASCO" hint="Opțional — apare în Anexa 1, ex: 200 EUR sau 10%">
+              <Input value={form.casco_fransiza} onChange={set('casco_fransiza')} />
             </Field>
           </div>
         </FormSection>

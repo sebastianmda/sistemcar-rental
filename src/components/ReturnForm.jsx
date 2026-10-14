@@ -33,7 +33,6 @@ function savedReturn(rental, handedOver) {
     .map((x) => x.trim())
     .filter(Boolean)
   const known = handedOver.map((e) => e.label)
-  const calendarDays = rentalDays(rental.data_predare, rental.data_returnare)
   return {
     data_returnare: toLocalInput(rental.data_returnare),
     km_primire: rental.km_primire ?? '',
@@ -46,8 +45,6 @@ function savedReturn(rental, handedOver) {
     taxa_igienizare: Boolean(rental.taxa_igienizare),
     realimentare: Boolean(rental.realimentare),
     cost_combustibil: rental.realimentare && Number(rental.cost_combustibil) ? String(rental.cost_combustibil) : '',
-    penalizare: '',
-    zi_extra: Number(rental.zile_facturabile) > calendarDays,
     trimite_service: false,
   }
 }
@@ -73,8 +70,6 @@ export default function ReturnForm({ rental, editing = false, onClose, onDone })
           taxa_igienizare: false,
           realimentare: false,
           cost_combustibil: '',
-          penalizare: '',
-          zi_extra: false,
           trimite_service: false,
         }
   )
@@ -87,16 +82,13 @@ export default function ReturnForm({ rental, editing = false, onClose, onDone })
   const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }))
   const setFlag = (key) => (v) => setForm((f) => ({ ...f, [key]: v }))
 
-  // contract art. 3: late return over 1 hour is penalised; over 4 hours a full day is billed
-  const lateHours = (new Date(form.data_returnare) - new Date(rental.data_returnare_planificata)) / 3600000
-  const calendarDays = rentalDays(rental.data_predare, form.data_returnare)
-  const days = calendarDays + (form.zi_extra && lateHours > 4 ? 1 : 0)
+  // contract art. 3: calendar days, both the handover day and the return day, whatever the hour
+  const days = rentalDays(rental.data_predare, form.data_returnare)
   const rent = days * Number(rental.tarif_zilnic || 0)
   const fees =
     (form.taxa_curatare ? FEES.curatare : 0) +
     (form.taxa_igienizare ? FEES.igienizare : 0) +
-    (form.realimentare ? FEES.realimentare + (Number(form.cost_combustibil) || 0) : 0) +
-    (Number(form.penalizare) || 0)
+    (form.realimentare ? FEES.realimentare + (Number(form.cost_combustibil) || 0) : 0)
   const computed = rent + fees
   // editing: keep the saved total if it was set by hand (discount, penalty) — it can be recalculated with one tap
   useEffect(() => {
@@ -242,22 +234,6 @@ export default function ReturnForm({ rental, editing = false, onClose, onDone })
                 <Input type="number" inputMode="decimal" min={0} value={form.cost_combustibil} onChange={set('cost_combustibil')} />
               </Field>
             )}
-            {lateHours > 1 && (
-              <div className="space-y-2 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">
-                <div>
-                  Retur cu <b>{Math.floor(lateHours)} h {Math.round((lateHours % 1) * 60)} min</b> după ora convenită. Conform contractului,
-                  întârzierea de peste 1 oră se penalizează{lateHours > 4 ? ', iar peste 4 ore se facturează o zi întreagă' : ''}.
-                </div>
-                {lateHours > 4 && (
-                  <Check checked={form.zi_extra} onChange={setFlag('zi_extra')}>
-                    Facturează o zi în plus ({calendarDays} zile calendaristice + 1)
-                  </Check>
-                )}
-                <Field label="Penalizare întârziere (RON)" className="max-w-xs">
-                  <Input type="number" inputMode="decimal" min={0} value={form.penalizare} onChange={set('penalizare')} />
-                </Field>
-              </div>
-            )}
           </div>
         </FormSection>
 
@@ -265,7 +241,7 @@ export default function ReturnForm({ rental, editing = false, onClose, onDone })
           <Card className="px-4 py-2">
             <InfoRow label="Zile facturabile">{days}</InfoRow>
             <InfoRow label={`Chirie ${days} × ${fmtMoney(rental.tarif_zilnic)}`}>{fmtMoney(rent)}</InfoRow>
-            {fees > 0 && <InfoRow label="Servicii suplimentare / penalizări">{fmtMoney(fees)}</InfoRow>}
+            {fees > 0 && <InfoRow label="Servicii suplimentare">{fmtMoney(fees)}</InfoRow>}
             <InfoRow label="Total calculat (fără TVA)">
               <span className="text-base">{fmtMoney(computed)}</span>
             </InfoRow>

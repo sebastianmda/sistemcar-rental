@@ -11,7 +11,7 @@ import { Modal, Button, Field, Input, Select, Textarea, FormSection, ErrorText }
 import { UploadProgress } from './Media'
 import { DateTimeInput } from './DateInputs'
 import { DelegateFields } from './ClientFields'
-import { EquipmentChecklist } from './HandoverForm'
+import { EquipmentChecklist, CascoField } from './HandoverForm'
 import { useArchiveRefresh } from './Contract'
 
 const str = (v) => (v === null || v === undefined ? '' : String(v))
@@ -50,6 +50,8 @@ export default function HandoverEditForm({ rental, onClose, onDone }) {
     sofer2_nume: str(rental.sofer2_nume),
     sofer2_permis: str(rental.sofer2_permis),
     observatii_predare: str(rental.observatii_predare),
+    casco: rental.casco === undefined ? null : rental.casco,
+    casco_fransiza: str(rental.casco_fransiza),
   })
   const [delegate, setDelegate] = useState(() => delegateOf(rental))
   const [saving, setSaving] = useState(null)
@@ -167,6 +169,11 @@ export default function HandoverEditForm({ rental, onClose, onDone }) {
             <div className="mb-1 text-sm font-medium text-slate-700">Dotări și documente predate (Anexa 1)</div>
             <EquipmentChecklist value={form.dotari_predare} onChange={(v) => setForm((f) => ({ ...f, dotari_predare: v }))} />
           </div>
+          <CascoField
+            casco={form.casco}
+            fransiza={form.casco_fransiza}
+            onChange={(c) => setForm((f) => ({ ...f, ...c }))}
+          />
           <Field label="Număr chei predate" className="max-w-[10rem]">
             <Input type="number" inputMode="numeric" min={0} value={form.nr_chei} onChange={set('nr_chei')} />
           </Field>

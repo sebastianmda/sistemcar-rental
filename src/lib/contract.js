@@ -1,5 +1,6 @@
 // Generates the Sistemcar rental contract (+ Anexa 1) as a PDF, filled with the rental's data.
-// The legal text and layout mirror "Contract_inchiriere_SISTEMCAR.docx" (versiunea din 29.09.2026, ora 10:24).
+// The legal text and layout mirror "Contract_inchiriere_SISTEMCAR.docx" (versiunea din 29.09.2026, ora 10:24),
+// with the changes requested on 14.10.2026 (art. 3 durată estimată, art. 4 servicii suplimentare, art. 5 + Anexa 1 CASCO).
 import { EQUIPMENT, FEES, SERVICE_NAMES, fuelEighths, splitIdCard } from './rentalTerms'
 import { fmtDate, fmtDateOnly, fmtTime, rentalDays } from './format'
 import { clientName, contractPerson, isCompany } from './party'
@@ -200,27 +201,28 @@ export function buildContractDefinition({ rental, company: companyIn, photoCount
     // ---------- 3 ----------
     H('3. DURATA ȘI CALCULUL PERIOADEI DE ÎNCHIRIERE'),
     P([
-      'Contractul începe la data și ora predării autovehiculului, consemnate în Anexa 1. Durata convenită este de ',
+      'Contractul începe la data și ora predării autovehiculului, consemnate în Anexa 1. Durata estimată a închirierii este de ',
       { text: String(agreedDays), bold: true },
-      ' zile.',
+      ' zile, perioada efectivă fiind determinată de data predării și data restituirii autovehiculului, consemnate în Anexa 1.',
     ]),
     P(
-      'În cazul în care autovehiculul este închiriat ca autovehicul de înlocuire pe durata instrumentării unui dosar de daună, ' +
-        'durata convenită este estimativă și depinde de instrumentarea dosarului de daună. Locatarul are obligația să restituie ' +
-        'autovehiculul în cel mult 24 de ore de la anunțarea de către Locator.'
+      'În cazul în care autovehiculul nu este restituit la expirarea duratei estimate, închirierea poate continua în aceleași condiții ' +
+        'contractuale, cu acordul părților, până la restituirea efectivă. Pentru continuarea închirierii peste 30 de zile de la predare ' +
+        'este necesar acordul scris al Locatorului, inclusiv prin SMS sau e-mail.'
     ),
     P(
-      'La expirarea duratei convenite, dacă autovehiculul nu a fost restituit, închirierea se prelungește de drept, zi cu zi, la același tarif, ' +
-        'până la restituirea efectivă sau până la împlinirea a 30 de zile de la predare. Pentru continuarea închirierii peste 30 de zile este ' +
-        'necesar acordul scris al Locatorului, inclusiv prin SMS sau e-mail.'
+      'În cazul închirierilor aferente dosarelor de daună, durata închirierii este estimativă și depinde de evoluția instrumentării ' +
+        'dosarului și/sau de efectuarea reparațiilor. Locatorul poate solicita restituirea autovehiculului atunci când încetează necesitatea ' +
+        'utilizării acestuia ca autovehicul de înlocuire. Locatarul are obligația de a restitui autovehiculul în termen de 24 de ore de la ' +
+        'comunicarea solicitării, cu respectarea dispozițiilor legale aplicabile.'
     ),
     P(
-      'La calculul perioadei de închiriere se includ atât ziua predării, cât și ziua restituirii autovehiculului, fiecare zi calendaristică în ' +
-        'care autovehiculul se află la dispoziția Locatarului fiind considerată zi de închiriere și fiind facturată integral.'
+      'Restituirea anticipată a autovehiculului, acceptată de Locator și consemnată în Anexa 1, determină încetarea închirierii, fără ' +
+        'obligația Locatarului de a achita zilele rămase din durata estimată.'
     ),
     P(
-      'Data și ora efectivă a predării și restituirii se consemnează în Anexa 1. Întârziere la retur de peste 1 oră se penalizează; ' +
-        'peste 4 ore se facturează o zi întreagă.'
+      'Perioada de închiriere se calculează în zile calendaristice, incluzând atât ziua predării, cât și ziua restituirii autovehiculului, ' +
+        'fiecare zi fiind considerată zi de închiriere și facturată integral, indiferent de ora predării sau restituirii.'
     ),
 
     // ---------- 4 ----------
@@ -252,8 +254,9 @@ export function buildContractDefinition({ rental, company: companyIn, photoCount
       ' / alimentare.',
     ], { margin: [10, 0, 0, 4] }),
     P(
-      'Necesitatea acestor servicii se constată la restituire, în Anexa 1 și într-un proces-verbal de constatare, susținut de fotografii. ' +
-        'Refuzul Locatarului de a semna nu împiedică facturarea; în acest caz refuzul se consemnează în procesul-verbal.'
+      'Serviciile suplimentare se facturează numai atunci când sunt necesare, în condițiile prezentului contract, și sunt justificate prin ' +
+        'constatările efectuate la restituirea autovehiculului, consemnate în procesul-verbal de constatare la restituire și, după caz, prin ' +
+        'fotografii. Refuzul Locatarului de a semna nu împiedică facturarea; în acest caz refuzul se consemnează în procesul-verbal.'
     ),
 
     // ---------- 5 ----------
@@ -263,7 +266,9 @@ export function buildContractDefinition({ rental, company: companyIn, photoCount
         'Ieșirea din România doar cu acord scris.'
     ),
     P(
-      'Mașina are RCA și CASCO. Franșiza și daunele neacoperite (inclusiv interior) cad în sarcina Locatarului. La accident anunță Locatorul de ' +
+      'Autovehiculul beneficiază de asigurare RCA valabilă. Existența unei asigurări CASCO, dacă este cazul, se menționează în Anexa 1. ' +
+        'Locatarul răspunde pentru prejudiciile produse autovehiculului în condițiile prezentului contract și ale legislației aplicabile. ' +
+        'Franșiza și daunele neacoperite (inclusiv interior) cad în sarcina Locatarului. La accident anunță Locatorul de ' +
         'îndată și întocmește amiabilă sau proces-verbal.'
     ),
     P(
@@ -341,6 +346,16 @@ export function buildContractDefinition({ rental, company: companyIn, photoCount
     P([
       'Vehicul: ', val(vehicle.nume_model, 10), ' nr. ', val(vehicle.inmatriculare, 10),
       ' km la bord: ', val(rental.km_predare, 10), ' combustibil: ', val(fuelOut, 6), ' / 8',
+    ]),
+    line([
+      'Asigurare CASCO: ',
+      box(rental.casco === true),
+      'DA',
+      { text: ' ', width: 4 },
+      box(rental.casco === false),
+      'NU',
+      { text: '   franșiză CASCO: ', width: 'auto' },
+      rental.casco === true && has(rental.casco_fransiza) ? val(rental.casco_fransiza) : rental.casco === false ? '—' : blank(14),
     ]),
     P(['Observații / avarii la predare: ', has(rental.observatii_predare) ? val(rental.observatii_predare) : blank(60)]),
     photoSet('Set foto predare:', photoCounts.predare || 0, photosKnown),

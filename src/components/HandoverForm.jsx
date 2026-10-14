@@ -31,6 +31,50 @@ const CONTRACT_DELEGATE_FIELDS = [
   ['delegat_permis_numar', 'permis delegat'],
 ]
 
+// CASCO: valid policy on the car at handover -> DA, with the car's franchise (both editable)
+export function cascoFromVehicle(v) {
+  const valid = Boolean(v?.casco_expira) && new Date(String(v.casco_expira).slice(0, 10) + 'T23:59:59') >= new Date()
+  return { casco: valid, casco_fransiza: valid ? v?.casco_fransiza || '' : '' }
+}
+
+// Anexa 1: "Asigurare CASCO: DA / NU" + franchise when DA
+export function CascoField({ casco, fransiza, onChange }) {
+  return (
+    <div className="space-y-2">
+      <div className="text-sm font-medium text-slate-700">Asigurare CASCO (apare în Anexa 1)</div>
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="inline-flex overflow-hidden rounded-lg ring-1 ring-slate-300">
+          <button
+            type="button"
+            aria-pressed={casco === true}
+            onClick={() => onChange({ casco: true, casco_fransiza: fransiza })}
+            className={`px-4 py-1.5 text-sm font-medium ${casco === true ? 'bg-emerald-600 text-white' : 'bg-white text-slate-600'}`}
+          >
+            CASCO: DA
+          </button>
+          <button
+            type="button"
+            aria-pressed={casco === false}
+            onClick={() => onChange({ casco: false, casco_fransiza: '' })}
+            className={`px-4 py-1.5 text-sm font-medium ${casco === false ? 'bg-slate-700 text-white' : 'bg-white text-slate-600'}`}
+          >
+            CASCO: NU
+          </button>
+        </div>
+        {casco === true && (
+          <input
+            aria-label="Franșiză CASCO"
+            value={fransiza || ''}
+            onChange={(e) => onChange({ casco: true, casco_fransiza: e.target.value })}
+            placeholder="Franșiză, ex: 200 EUR sau 10%"
+            className="w-56 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-[15px] focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+          />
+        )}
+      </div>
+    </div>
+  )
+}
+
 export function EquipmentChecklist({ value, onChange, keys }) {
   return (
     <div className="divide-y divide-slate-100 rounded-lg border border-slate-200">
@@ -83,6 +127,7 @@ export default function HandoverForm({ initialVehicleId, onClose, onDone }) {
     sofer2_permis: '',
     nr_chei: 1,
     dotari_predare: defaultEquipment(),
+    ...cascoFromVehicle(firstVehicle),
     numar_contract: '',
     data_contract: '',
   })
@@ -103,7 +148,7 @@ export default function HandoverForm({ initialVehicleId, onClose, onDone }) {
 
   const chooseVehicle = (id) => {
     const v = vehicles.find((x) => x.id === id)
-    setForm((f) => ({ ...f, vehicle_id: id, tarif_zilnic: v?.tarif_zilnic ?? defaultTariff, km_predare: v?.km_actuali ?? '' }))
+    setForm((f) => ({ ...f, vehicle_id: id, tarif_zilnic: v?.tarif_zilnic ?? defaultTariff, km_predare: v?.km_actuali ?? '', ...cascoFromVehicle(v) }))
   }
 
   const docs = vehicle ? vehicleDocs(vehicle) : []
@@ -349,6 +394,11 @@ export default function HandoverForm({ initialVehicleId, onClose, onDone }) {
             <div className="mb-1 text-sm font-medium text-slate-700">Dotări și documente predate (Anexa 1)</div>
             <EquipmentChecklist value={form.dotari_predare} onChange={(v) => setForm((f) => ({ ...f, dotari_predare: v }))} />
           </div>
+          <CascoField
+            casco={form.casco}
+            fransiza={form.casco_fransiza}
+            onChange={(c) => setForm((f) => ({ ...f, ...c }))}
+          />
           <Field label="Număr chei predate" className="max-w-[10rem]">
             <Input type="number" inputMode="numeric" min={0} value={form.nr_chei} onChange={set('nr_chei')} />
           </Field>
