@@ -7,6 +7,7 @@ import { friendlyError } from '../lib/errors'
 import { DEFAULT_COMPANY } from '../lib/contract'
 import { Button, Card, Field, Input, PageHeader } from '../components/ui'
 import SignaturePad from '../components/SignaturePad'
+import { ContractRefreshCard } from '../components/Contract'
 import { WARNING_DAYS, CRITICAL_DAYS } from '../lib/alerts'
 
 const COMPANY_FIELDS = [
@@ -178,6 +179,8 @@ export default function SettingsPage({ email, onLogout }) {
             Salvează datele firmei
           </Button>
         </Card>
+
+        <ContractRefreshCard />
 
         <Card className="p-5">
           <h2 className="font-semibold text-slate-900">Alerte documente</h2>

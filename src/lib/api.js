@@ -90,6 +90,9 @@ async function run(query) {
   return data
 }
 
+// bump when the contract text changes (archived PDFs without this tag are offered for rebuilding)
+export const CONTRACT_TEXT_VERSION = 'text-20261014'
+
 const RENTAL_SELECT =
   '*, vehicle:vehicles(id, nume_model, inmatriculare, km_actuali, an_fabricatie, vin), ' +
   'client:clients(*)'
@@ -301,7 +304,8 @@ export const api = {
 
   // stores the signed contract PDF and links it to the rental
   async uploadContract(rental, blob) {
-    const path = `contracts/${rental.id}/contract-${Date.now()}.pdf`
+    // the file name carries the contract-text version, so old PDFs can be found and rebuilt later
+    const path = `contracts/${rental.id}/contract-${Date.now()}-${CONTRACT_TEXT_VERSION}.pdf`
     const { error } = await supabase.storage.from(BUCKET).upload(path, blob, { contentType: 'application/pdf', upsert: false })
     if (error) throw error
     return api.saveRentalFields(rental.id, { contract_pdf: path, contract_semnat_la: new Date().toISOString() })

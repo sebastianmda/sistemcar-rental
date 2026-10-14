@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { FileText, PenLine, Share2, Printer, CheckCircle2, ExternalLink, Hash, Save, ClipboardCheck, Pencil } from 'lucide-react'
 import { useData } from '../context/DataContext'
 import { useToast } from './Toast'
-import { api } from '../lib/api'
+import { api, CONTRACT_TEXT_VERSION } from '../lib/api'
 import { friendlyError } from '../lib/errors'
 import {
   contractPdfBlob,
@@ -55,6 +55,65 @@ export function useArchiveRefresh() {
     const blob = await generate(rental)
     return api.uploadContract(rental, blob)
   }
+}
+
+// archived PDFs that can be rebuilt with the current contract text: signed on paper (or not signed yet).
+// Contracts signed on screen are left as they are: the tenant's signature stays under the text he signed.
+export const signedOnScreen = (r) => Boolean(r.semnatura_locatar_predare || r.semnatura_locatar_retur)
+const textOutdated = (r) => !String(r.contract_pdf || '').includes(CONTRACT_TEXT_VERSION)
+export const canRefreshText = (r) => Boolean(r.contract_pdf) && r.status !== 'anulata' && !signedOnScreen(r) && textOutdated(r)
+
+// Settings: rebuild all archived contracts with the current text (data unchanged)
+export function ContractRefreshCard() {
+  const toast = useToast()
+  const { rentals, reload } = useData()
+  const refreshArchive = useArchiveRefresh()
+  const [progress, setProgress] = useState(null)
+  const [result, setResult] = useState(null)
+  const todo = rentals.filter(canRefreshText)
+  const onScreen = rentals.filter((r) => r.contract_pdf && r.status !== 'anulata' && signedOnScreen(r) && textOutdated(r)).length
+
+  const runAll = async () => {
+    if (!todo.length) return
+    if (!confirm(`Refaci ${todo.length} contracte cu textul nou? Datele introduse rămân neschimbate.`)) return
+    setResult(null)
+    let failed = 0
+    for (let i = 0; i < todo.length; i++) {
+      setProgress(`Se actualizează contractele ${i + 1}/${todo.length}…`)
+      try {
+        await refreshArchive(todo[i])
+      } catch {
+        failed++
+      }
+    }
+    setProgress(null)
+    await reload()
+    const done = todo.length - failed
+    const doneText = done === 1 ? '1 contract actualizat' : `${done} contracte actualizate`
+    setResult(failed ? `${doneText}; ${failed} nu au putut fi actualizate (încearcă din nou).` : `${doneText}.`)
+    toast(failed ? 'Unele contracte nu au putut fi actualizate' : 'Contractele au fost actualizate', failed ? 'error' : undefined)
+  }
+
+  return (
+    <Card className="p-5">
+      <h2 className="font-semibold text-slate-900">Actualizare contracte la modelul nou</h2>
+      <p className="mt-1 text-sm text-slate-500">
+        Reface PDF-urile contractelor deja salvate cu textul actual al contractului. Datele introduse (client, mașină, date, km, taxe) rămân
+        exact cum sunt. Contractele semnate pe hârtie trebuie retipărite și semnate din nou dacă vrei ca și hârtia să aibă textul nou.
+      </p>
+      {onScreen > 0 && (
+        <p className="mt-2 text-sm text-amber-700">
+          {onScreen} {onScreen === 1 ? 'contract semnat pe ecran rămâne' : 'contracte semnate pe ecran rămân'} neschimbat
+          {onScreen === 1 ? '' : 'e'}: semnătura clientului nu se mută sub un text pe care nu l-a semnat.
+        </p>
+      )}
+      <Button className="mt-4" icon={FileText} loading={!!progress} disabled={!todo.length} onClick={runAll}>
+        {todo.length ? `Actualizează ${todo.length} ${todo.length === 1 ? 'contract' : 'contracte'}` : 'Toate contractele sunt la zi'}
+      </Button>
+      <UploadProgress text={progress} />
+      {result && <p className="mt-2 text-sm text-emerald-700">{result}</p>}
+    </Card>
+  )
 }
 
 // a stage counts as done when it was signed on screen OR printed and signed with a pen
@@ -397,6 +456,16 @@ export function ContractCard({ rental, onSign, onChanged, onEditHandover, onEdit
   const hasServices = returned && returnReportServices(rental).length > 0
   const reportName = contractFileName(rental, 'Proces-verbal_constatare')
 
+  const refreshArchive = useArchiveRefresh()
+  const refreshText = () => {
+    if (!confirm('Refaci PDF-ul acestui contract cu textul nou? Datele introduse rămân neschimbate.')) return
+    return run('refresh', async () => {
+      await refreshArchive(rental)
+      toast('Contractul a fost refăcut cu textul nou')
+      onChanged?.()
+    })
+  }
+
   const openReport = () => {
     const win = window.open('', '_blank')
     return run('report', async () => {
@@ -484,6 +553,11 @@ export function ContractCard({ rental, onSign, onChanged, onEditHandover, onEdit
         {returned && onEditReturn && (
           <Button size="sm" variant="secondary" icon={Pencil} onClick={onEditReturn}>
             Editează returul
+          </Button>
+        )}
+        {canRefreshText(rental) && (
+          <Button size="sm" variant="ghost" icon={FileText} loading={busy === 'refresh'} onClick={refreshText}>
+            Refă cu textul nou
           </Button>
         )}
         <Button size="sm" variant="ghost" icon={Hash} onClick={() => setEditingNumber(true)}>
