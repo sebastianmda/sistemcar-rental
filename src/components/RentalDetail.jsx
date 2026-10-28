@@ -121,6 +121,12 @@ export default function RentalDetail({ rental, onClose, onReturn, onChanged, onS
         <Card className="px-4 py-3">
           <InfoRow label="Tarif zilnic">{fmtMoney(rental.tarif_zilnic)}</InfoRow>
           <InfoRow label={active ? 'Zile (planificat)' : 'Zile facturabile'}>{rental.zile_facturabile ?? days}</InfoRow>
+          {!active && Number(rental.zile_nefacturate) > 0 && (
+            <InfoRow label="Zile nefacturate (imputabile Locatorului)">
+              {rental.zile_nefacturate}
+              {rental.zile_nefacturate_motiv ? ` — ${rental.zile_nefacturate_motiv}` : ''}
+            </InfoRow>
+          )}
           <InfoRow label="Garanție">{fmtMoney(rental.garantie)}</InfoRow>
           {rental.taxa_curatare && <InfoRow label="Curățenie">{fmtMoney(FEES.curatare)}</InfoRow>}
           {rental.taxa_igienizare && <InfoRow label="Igienizare">{fmtMoney(FEES.igienizare)}</InfoRow>}

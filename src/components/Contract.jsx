@@ -12,6 +12,7 @@ import {
   contractLabel,
   suggestContractNumber,
   returnReportPdfBlob,
+  returnSheetPdfBlob,
   returnReportServices,
 } from '../lib/contract'
 import { fmtDateTime } from '../lib/format'
@@ -44,7 +45,13 @@ function useContractTools() {
     return rental.contract_pdf && archiveUpToDate ? api.contractBlob(rental.contract_pdf) : generate(rental)
   }
 
-  return { settings, company, generate, current, report }
+  // Anexa 1, partea a 2-a (retur) only — the sheet printed and signed when the car comes back
+  const returnSheet = async (rental) => {
+    const photoCounts = await api.countMedia(rental.id).catch(() => ({}))
+    return returnSheetPdfBlob({ rental, company, photoCounts })
+  }
+
+  return { settings, company, generate, current, report, returnSheet }
 }
 
 // after a correction: the archived contract PDF is rebuilt with the new data (signatures kept)
@@ -134,7 +141,7 @@ const missingColumn = (err) => /semnat_hartie/.test(String(err?.message || err))
 // Default: save + print, the parties sign with a pen. Optional: sign on the phone screen.
 export function ContractSign({ rental, etapa, onClose, onSigned }) {
   const toast = useToast()
-  const { settings, generate } = useContractTools()
+  const { settings, generate, returnSheet } = useContractTools()
   const { rentals } = useData()
   const retur = etapa === 'retur'
   const [numar, setNumar] = useState(rental.numar_contract || '')
@@ -185,11 +192,13 @@ export function ContractSign({ rental, etapa, onClose, onSigned }) {
       }
       setBusy('Se generează contractul…')
       const blob = await generate(saved)
-      showPdf(blob, fileName, win)
+      // at the return only the return sheet is printed; the full contract is still archived
+      const printBlob = retur ? await returnSheet(saved) : blob
+      showPdf(printBlob, retur ? contractFileName(rental, 'Retur') : fileName, win)
       setBusy('Se arhivează contractul…')
       const archived = await api.uploadContract(saved, blob)
-      toast('Contract salvat. Tipărește-l și semnați cu pixul.')
-      setDone({ rental: archived, blob, paper: true })
+      toast(retur ? 'Retur salvat. Tipărește pagina de retur și semnați-o.' : 'Contract salvat. Tipărește-l și semnați cu pixul.')
+      setDone({ rental: archived, blob, printBlob, paper: true })
       onSigned?.(archived)
     } catch (err) {
       win?.close()
@@ -249,14 +258,16 @@ export function ContractSign({ rental, etapa, onClose, onSigned }) {
             <div className="font-semibold text-slate-900">{done.paper ? 'Contractul a fost salvat' : 'Contractul a fost semnat'}</div>
             <p className="mt-1 text-sm text-slate-500">
               {done.paper
-                ? 'S-a deschis PDF-ul. Tipărește-l (de obicei în 2 exemplare) și semnați amândoi cu pixul. Dacă nu s-a deschis, apasă Tipărește.'
+                ? retur
+                  ? 'S-a deschis pagina de retur (Anexa 1, partea a 2-a), completată. Tipărește-o în 2 exemplare și semnați-o amândoi. Dacă nu s-a deschis, apasă Tipărește.'
+                  : 'S-a deschis PDF-ul. Tipărește-l (de obicei în 2 exemplare) și semnați amândoi cu pixul. Dacă nu s-a deschis, apasă Tipărește.'
                 : 'PDF-ul este salvat la închiriere. Trimite-i clientului exemplarul lui.'}
             </p>
           </div>
           <div className="flex flex-col gap-2 sm:flex-row sm:justify-center">
             {done.paper ? (
-              <Button icon={Printer} onClick={() => showPdf(done.blob, fileName, window.open('', '_blank'))}>
-                Tipărește
+              <Button icon={Printer} onClick={() => showPdf(done.printBlob || done.blob, retur ? contractFileName(rental, 'Retur') : fileName, window.open('', '_blank'))}>
+                {retur ? 'Tipărește pagina de retur' : 'Tipărește'}
               </Button>
             ) : (
               <Button icon={Share2} onClick={() => sharePdf(done.blob, fileName)}>
@@ -326,8 +337,9 @@ export function ContractSign({ rental, etapa, onClose, onSigned }) {
         {!onScreen ? (
           <div className="space-y-3">
             <p className="rounded-lg bg-slate-50 p-3 text-sm text-slate-700">
-              Se salvează numărul și data, iar contractul se deschide gata de tipărit, cu locurile de semnătură libere.
-              Semnați amândoi cu pixul pe hârtie.
+              {retur
+                ? 'Se salvează, iar pagina de retur (Anexa 1, partea a 2-a) se deschide completată cu datele de la primire, gata de tipărit. Semnați-o amândoi cu pixul; pagina de predare semnată rămâne cum e.'
+                : 'Se salvează numărul și data, iar contractul se deschide gata de tipărit, cu locurile de semnătură libere. Semnați amândoi cu pixul pe hârtie.'}
             </p>
             <button type="button" onClick={() => setOnScreen(true)} className="text-sm font-medium text-blue-600">
               Vreau să semnăm pe ecran (cu degetul)
@@ -445,7 +457,7 @@ function ContractNumberEditor({ rental, onClose, onSaved }) {
 // Contract box shown in the rental details
 export function ContractCard({ rental, onSign, onChanged, onEditHandover, onEditReturn }) {
   const toast = useToast()
-  const { current, report } = useContractTools()
+  const { current, report, returnSheet } = useContractTools()
   const [busy, setBusy] = useState(null)
   const [editingNumber, setEditingNumber] = useState(false)
   const status = contractStatus(rental)
@@ -463,6 +475,18 @@ export function ContractCard({ rental, onSign, onChanged, onEditHandover, onEdit
       await refreshArchive(rental)
       toast('Contractul a fost refăcut cu textul nou')
       onChanged?.()
+    })
+  }
+
+  const openReturnSheet = () => {
+    const win = window.open('', '_blank')
+    return run('sheet', async () => {
+      try {
+        showPdf(await returnSheet(rental), contractFileName(rental, 'Retur'), win)
+      } catch (err) {
+        win?.close()
+        throw err
+      }
     })
   }
 
@@ -540,6 +564,11 @@ export function ContractCard({ rental, onSign, onChanged, onEditHandover, onEdit
         >
           Trimite
         </Button>
+        {returned && (
+          <Button size="sm" variant="secondary" icon={Printer} loading={busy === 'sheet'} onClick={openReturnSheet}>
+            Tipărește pagina de retur
+          </Button>
+        )}
         {returned && (
           <Button size="sm" variant={hasServices ? 'primary' : 'secondary'} icon={ClipboardCheck} loading={busy === 'report'} onClick={openReport}>
             Proces-verbal de constatare

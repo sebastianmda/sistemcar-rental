@@ -10,7 +10,7 @@ const VEHICLE_FIELDS = [
 ]
 
 // columns added by later SQL updates: if the update was not run yet, the save is retried without them
-const LATE_COLUMNS = ['casco_fransiza', 'casco']
+const LATE_COLUMNS = ['casco_fransiza', 'casco', 'zile_nefacturate_motiv', 'zile_nefacturate']
 async function tolerant(payload, write) {
   try {
     return await run(write(payload))
@@ -21,6 +21,26 @@ async function tolerant(payload, write) {
     const rest = { ...payload }
     missing.forEach((c) => delete rest[c])
     return tolerant(rest, write)
+  }
+}
+
+// return data shared by finishing and correcting a return
+function returnFields(data) {
+  const billable = Number(data.zile_facturabile)
+  const free = Math.max(0, Math.round(Number(data.zile_nefacturate) || 0))
+  return {
+    total_final: Number(data.total_final) || 0,
+    zile_facturabile: Number.isFinite(billable) && data.zile_facturabile !== '' && data.zile_facturabile !== null ? billable : null,
+    avarii_noi: Boolean(data.avarii_noi),
+    dotari_lipsa: data.dotari_lipsa?.trim() || null,
+    taxa_curatare: Boolean(data.taxa_curatare),
+    taxa_igienizare: Boolean(data.taxa_igienizare),
+    realimentare: Boolean(data.realimentare),
+    cost_combustibil: data.realimentare ? Number(data.cost_combustibil) || 0 : 0,
+    // zile nefacturate (imputabile Locatorului): sent only when used, so it works before SUPABASE_UPDATE_V9.sql
+    ...(free > 0 || data.zile_nefacturate_set
+      ? { zile_nefacturate: free, zile_nefacturate_motiv: free > 0 ? data.zile_nefacturate_motiv?.trim() || null : null }
+      : {}),
   }
 }
 
@@ -91,7 +111,7 @@ async function run(query) {
 }
 
 // bump when the contract text changes (archived PDFs without this tag are offered for rebuilding)
-export const CONTRACT_TEXT_VERSION = 'text-20261014'
+export const CONTRACT_TEXT_VERSION = 'text-20261028'
 
 const RENTAL_SELECT =
   '*, vehicle:vehicles(id, nume_model, inmatriculare, km_actuali, an_fabricatie, vin), ' +
@@ -179,27 +199,14 @@ export const api = {
   // corrects a return that was already saved: rental fields only, the car's status is left alone;
   // the car's km follows only if it still shows the old return km (no newer handover since)
   async updateReturn(rental, data) {
-    const updated = await run(
-      supabase
-        .from('rentals')
-        .update({
-          data_returnare: new Date(data.data_returnare).toISOString(),
-          km_primire: data.km_primire === '' ? null : Number(data.km_primire),
-          combustibil_primire: data.combustibil_primire || null,
-          observatii_primire: data.observatii_primire?.trim() || null,
-          total_final: Number(data.total_final) || 0,
-          zile_facturabile: Number(data.zile_facturabile) || null,
-          avarii_noi: Boolean(data.avarii_noi),
-          dotari_lipsa: data.dotari_lipsa?.trim() || null,
-          taxa_curatare: Boolean(data.taxa_curatare),
-          taxa_igienizare: Boolean(data.taxa_igienizare),
-          realimentare: Boolean(data.realimentare),
-          cost_combustibil: data.realimentare ? Number(data.cost_combustibil) || 0 : 0,
-        })
-        .eq('id', rental.id)
-        .select(RENTAL_SELECT)
-        .single()
-    )
+    const fields = {
+      data_returnare: new Date(data.data_returnare).toISOString(),
+      km_primire: data.km_primire === '' ? null : Number(data.km_primire),
+      combustibil_primire: data.combustibil_primire || null,
+      observatii_primire: data.observatii_primire?.trim() || null,
+      ...returnFields(data),
+    }
+    const updated = await tolerant(fields, (f) => supabase.from('rentals').update(f).eq('id', rental.id).select(RENTAL_SELECT).single())
     const oldKm = rental.km_primire
     if (updated.km_primire !== null && oldKm !== null && rental.vehicle?.km_actuali === oldKm && oldKm !== updated.km_primire) {
       await run(supabase.from('vehicles').update({ km_actuali: updated.km_primire, updated_at: new Date().toISOString() }).eq('id', rental.vehicle_id))
@@ -229,28 +236,15 @@ export const api = {
   },
 
   async finishRental(rental, data) {
-    const updated = await run(
-      supabase
-        .from('rentals')
-        .update({
-          status: 'finalizata',
-          data_returnare: new Date(data.data_returnare).toISOString(),
-          km_primire: data.km_primire === '' ? null : Number(data.km_primire),
-          combustibil_primire: data.combustibil_primire || null,
-          observatii_primire: data.observatii_primire?.trim() || null,
-          total_final: Number(data.total_final) || 0,
-          zile_facturabile: Number(data.zile_facturabile) || null,
-          avarii_noi: Boolean(data.avarii_noi),
-          dotari_lipsa: data.dotari_lipsa?.trim() || null,
-          taxa_curatare: Boolean(data.taxa_curatare),
-          taxa_igienizare: Boolean(data.taxa_igienizare),
-          realimentare: Boolean(data.realimentare),
-          cost_combustibil: data.realimentare ? Number(data.cost_combustibil) || 0 : 0,
-        })
-        .eq('id', rental.id)
-        .select(RENTAL_SELECT)
-        .single()
-    )
+    const fields = {
+      status: 'finalizata',
+      data_returnare: new Date(data.data_returnare).toISOString(),
+      km_primire: data.km_primire === '' ? null : Number(data.km_primire),
+      combustibil_primire: data.combustibil_primire || null,
+      observatii_primire: data.observatii_primire?.trim() || null,
+      ...returnFields(data),
+    }
+    const updated = await tolerant(fields, (f) => supabase.from('rentals').update(f).eq('id', rental.id).select(RENTAL_SELECT).single())
     const vehicleUpdate = {
       status: data.trimite_service ? 'Service' : 'Disponibil',
       updated_at: new Date().toISOString(),

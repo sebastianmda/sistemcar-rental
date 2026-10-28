@@ -45,6 +45,8 @@ function savedReturn(rental, handedOver) {
     taxa_igienizare: Boolean(rental.taxa_igienizare),
     realimentare: Boolean(rental.realimentare),
     cost_combustibil: rental.realimentare && Number(rental.cost_combustibil) ? String(rental.cost_combustibil) : '',
+    zile_nefacturate: Number(rental.zile_nefacturate) > 0 ? String(rental.zile_nefacturate) : '',
+    zile_nefacturate_motiv: rental.zile_nefacturate_motiv || '',
     trimite_service: false,
   }
 }
@@ -70,6 +72,8 @@ export default function ReturnForm({ rental, editing = false, onClose, onDone })
           taxa_igienizare: false,
           realimentare: false,
           cost_combustibil: '',
+          zile_nefacturate: '',
+          zile_nefacturate_motiv: '',
           trimite_service: false,
         }
   )
@@ -82,8 +86,11 @@ export default function ReturnForm({ rental, editing = false, onClose, onDone })
   const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }))
   const setFlag = (key) => (v) => setForm((f) => ({ ...f, [key]: v }))
 
-  // contract art. 3: calendar days, both the handover day and the return day, whatever the hour
-  const days = rentalDays(rental.data_predare, form.data_returnare)
+  // contract art. 3: calendar days, both the handover day and the return day, whatever the hour,
+  // minus the days imputable to the Locator (not billed to the client nor to the insurer)
+  const calendarDays = rentalDays(rental.data_predare, form.data_returnare)
+  const freeDays = Math.max(0, Math.round(Number(form.zile_nefacturate) || 0))
+  const days = Math.max(0, calendarDays - freeDays)
   const rent = days * Number(rental.tarif_zilnic || 0)
   const fees =
     (form.taxa_curatare ? FEES.curatare : 0) +
@@ -112,10 +119,20 @@ export default function ReturnForm({ rental, editing = false, onClose, onDone })
     if (!form.data_returnare) return setError('Completează data și ora returului (ex: 27.09.2026 și 14:30).')
     if (kmDriven !== null && kmDriven < 0) return setError('Kilometrajul la primire nu poate fi mai mic decât la predare.')
     if (new Date(form.data_returnare) < new Date(rental.data_predare)) return setError('Data primirii este înaintea predării.')
+    if (freeDays > calendarDays) return setError(`Zilele nefacturate (${freeDays}) nu pot fi mai multe decât zilele de închiriere (${calendarDays}).`)
+    if (freeDays > 0 && !form.zile_nefacturate_motiv.trim())
+      return setError('Scrie perioada și motivul zilelor nefacturate (apar în Anexa 1).')
     setSaving(true)
     try {
       setProgress(editing ? 'Se salvează modificările…' : 'Se salvează primirea…')
-      const data = { ...form, dotari_lipsa: missing, zile_facturabile: days, total_final: total }
+      const data = {
+        ...form,
+        dotari_lipsa: missing,
+        zile_facturabile: days,
+        zile_nefacturate: freeDays,
+        zile_nefacturate_set: editing,
+        total_final: total,
+      }
       let updated = editing ? await api.updateReturn(rental, data) : await api.finishRental(rental, data)
       if (files.length) {
         const failed = await api.uploadMany(rental.id, 'primire', files, (i, n) => setProgress(`Se încarcă pozele ${i}/${n}…`))
@@ -125,6 +142,8 @@ export default function ReturnForm({ rental, editing = false, onClose, onDone })
         setProgress('Se actualizează contractul arhivat…')
         updated = await refreshArchive(updated).catch(() => updated)
       }
+      if (freeDays > 0 && updated.zile_nefacturate === undefined)
+        toast('Motivul zilelor nefacturate nu s-a salvat: rulează SUPABASE_UPDATE_V9.sql în Supabase.', 'error')
       toast(editing ? 'Returul a fost corectat' : 'Mașina a fost primită')
       onDone(updated)
     } catch (err) {
@@ -237,8 +256,36 @@ export default function ReturnForm({ rental, editing = false, onClose, onDone })
           </div>
         </FormSection>
 
+        <FormSection
+          title="Zile nefacturate (imputabile Locatorului)"
+          description="Doar dacă e cazul: zile din perioada reală care nu se facturează nici clientului, nici asigurătorului — de ex. întârzieri din vina Sistemcar în instrumentarea dosarului."
+        >
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-[10rem_minmax(0,1fr)]">
+            <Field label="Nr. zile nefacturate">
+              <Input
+                type="number"
+                inputMode="numeric"
+                min={0}
+                max={calendarDays}
+                value={form.zile_nefacturate}
+                onChange={set('zile_nefacturate')}
+                placeholder="0"
+              />
+            </Field>
+            <Field label="Perioada și motivul" hint={freeDays > 0 ? 'Apare în Anexa 1 a contractului.' : null}>
+              <Input
+                value={form.zile_nefacturate_motiv}
+                onChange={set('zile_nefacturate_motiv')}
+                placeholder="ex: 01.10–02.10, întârziere transmitere documente la asigurător, imputabilă Sistemcar"
+              />
+            </Field>
+          </div>
+        </FormSection>
+
         <FormSection title="Decont">
           <Card className="px-4 py-2">
+            {freeDays > 0 && <InfoRow label="Zile calendaristice">{calendarDays}</InfoRow>}
+            {freeDays > 0 && <InfoRow label="Zile nefacturate (imputabile Locatorului)">−{freeDays}</InfoRow>}
             <InfoRow label="Zile facturabile">{days}</InfoRow>
             <InfoRow label={`Chirie ${days} × ${fmtMoney(rental.tarif_zilnic)}`}>{fmtMoney(rent)}</InfoRow>
             {fees > 0 && <InfoRow label="Servicii suplimentare">{fmtMoney(fees)}</InfoRow>}

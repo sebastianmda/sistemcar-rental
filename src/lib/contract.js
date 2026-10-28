@@ -1,6 +1,7 @@
 // Generates the Sistemcar rental contract (+ Anexa 1) as a PDF, filled with the rental's data.
 // The legal text and layout mirror "Contract_inchiriere_SISTEMCAR.docx" (versiunea din 29.09.2026, ora 10:24),
-// with the changes requested on 14.10.2026 (art. 3 durată estimată, art. 4 servicii suplimentare, art. 5 + Anexa 1 CASCO).
+// with the changes requested on 14.10.2026 (art. 3 durată estimată, art. 4 servicii suplimentare, art. 5 + Anexa 1 CASCO)
+// and on 28.10.2026 (art. 3 + Anexa 1: zile nefacturate imputabile Locatorului).
 import { EQUIPMENT, FEES, SERVICE_NAMES, fuelEighths, splitIdCard } from './rentalTerms'
 import { fmtDate, fmtDateOnly, fmtTime, rentalDays } from './format'
 import { clientName, contractPerson, isCompany } from './party'
@@ -103,7 +104,7 @@ function twoColumns(left, right, margin = [0, 8, 0, 6]) {
   return { columns: [{ width: '*', ...left }, { width: '*', ...right }], columnGap: 24, margin, unbreakable: true }
 }
 
-export function buildContractDefinition({ rental, company: companyIn, photoCounts = {} }) {
+export function buildContractDefinition({ rental, company: companyIn, photoCounts = {}, onlyReturn = false }) {
   const company = { ...DEFAULT_COMPANY, ...(companyIn || {}) }
   const client = rental.client || {}
   const vehicle = rental.vehicle || {}
@@ -133,6 +134,67 @@ export function buildContractDefinition({ rental, company: companyIn, photoCount
       { stack: [box(v === false)], alignment: 'center' },
     ]
   })
+
+  // Anexa 1, partea a 2-a (retur): always on its own page, so at the return only this sheet is printed and signed.
+  // The small header identifies contract, parties and car, so the sheet is complete on its own.
+  const returnPage = (pageBreak) => [
+    { text: 'ANEXA 1 — PROCES-VERBAL DE PREDARE-PRIMIRE', style: 'title', fontSize: 13, ...(pageBreak ? { pageBreak: 'before' } : {}) },
+    { text: 'Partea a 2-a: RETUR — primirea autovehiculului de la Locatar', alignment: 'center', bold: true, color: NAVY },
+    {
+      text: ['la Contractul nr. ', { text: String(nr), bold: true }, ' / ', { text: contractDate || blank(14), bold: true }],
+      alignment: 'center',
+      margin: [0, 0, 0, 8],
+    },
+    P([
+      'Locator: ', { text: company.nume, bold: true },
+      '   Locatar: ', val(clientName(client), 24),
+      ...(pj ? [', prin delegat ', val(person.nume, 20)] : []),
+    ]),
+    P([
+      'Vehicul: ', val(vehicle.nume_model, 12), ' nr. ', val(vehicle.inmatriculare, 10),
+      ' — predat la ', val(fmtDateOnly(rental.data_predare), 10), ' ora ', val(fmtTime(rental.data_predare), 5),
+      ', km ', val(rental.km_predare, 8), ', combustibil ', val(fuelOut, 3), ' / 8',
+    ]),
+    H('2. RETUR de la Locatar'),
+    P(['Data ', val(returnDate, 10), ' ora ', val(returned ? fmtTime(rental.data_returnare) : '', 6)]),
+    P([
+      'Km la bord: ', val(returned ? rental.km_primire : '', 10),
+      '   combustibil: ', val(returned ? fuelIn : '', 6), ' / 8',
+      '   Zile facturabile: ', val(returned ? rental.zile_facturabile ?? rentalDays(rental.data_predare, rental.data_returnare) : '', 6),
+    ]),
+    P([
+      'Zile nefacturate (imputabile Locatorului): ',
+      returned ? (Number(rental.zile_nefacturate) > 0 ? val(rental.zile_nefacturate) : { text: '—', bold: true }) : blank(6),
+      '   perioada și motivul: ',
+      returned && Number(rental.zile_nefacturate) > 0 && has(rental.zile_nefacturate_motiv)
+        ? val(rental.zile_nefacturate_motiv)
+        : returned
+          ? { text: '—', bold: true }
+          : blank(40),
+    ]),
+    P(['Observații / avarii la retur: ', returned && has(rental.observatii_primire) ? val(rental.observatii_primire) : blank(60)]),
+    yesNo('Avarii noi:', returned ? Boolean(rental.avarii_noi) : null, returned && rental.avarii_noi ? '— detaliu: vezi observațiile' : `— detaliu: ${blank(36)}`),
+    P(['Dotări lipsă: ', returned ? (has(rental.dotari_lipsa) ? val(rental.dotari_lipsa) : { text: 'nu', bold: true }) : blank(60)]),
+    photoSet('Set foto retur:', photoCounts.primire || 0, returned && photosKnown),
+    yesNo(`Curățare autovehicul (${FEES.curatare} lei + TVA):`, returned ? Boolean(rental.taxa_curatare) : null),
+    yesNo(`Igienizare și dezodorizare (${FEES.igienizare} lei + TVA):`, returned ? Boolean(rental.taxa_igienizare) : null),
+    yesNo(
+      `Alimentare de către Locator (serviciu ${FEES.realimentare} lei + TVA, plus combustibil):`,
+      returned ? Boolean(rental.realimentare) : null,
+      returned && rental.realimentare && Number(rental.cost_combustibil) > 0 ? `— combustibil ${money(rental.cost_combustibil)} lei + TVA` : undefined
+    ),
+    twoColumns(
+      signBlock('Locator (retur):', rental.semnatura_locator_retur, company.reprezentant, returnDate),
+      signBlock(pj ? 'Locatar (predare înapoi), prin delegat:' : 'Locatar (predare înapoi):', rental.semnatura_locatar_retur, person.nume, returnDate)
+    ),
+    {
+      text: 'Anexa 1 face parte integrantă din contract. Predarea și returul se semnează pe loc, la datele de mai sus.',
+      fontSize: 7.5,
+      italics: true,
+      color: GRAY,
+      margin: [0, 4, 0, 0],
+    },
+  ]
 
   const content = [
     // ---------- antet ----------
@@ -223,6 +285,10 @@ export function buildContractDefinition({ rental, company: companyIn, photoCount
     P(
       'Perioada de închiriere se calculează în zile calendaristice, incluzând atât ziua predării, cât și ziua restituirii autovehiculului, ' +
         'fiecare zi fiind considerată zi de închiriere și facturată integral, indiferent de ora predării sau restituirii.'
+    ),
+    P(
+      'Zilele în care întârzierea instrumentării dosarului de daună sau a începerii reparației este imputabilă Locatorului nu se ' +
+        'facturează nici Locatarului, nici asigurătorului. Acestea se consemnează la restituire, în Anexa 1, cu indicarea perioadei și a motivului.'
     ),
 
     // ---------- 4 ----------
@@ -332,6 +398,7 @@ export function buildContractDefinition({ rental, company: companyIn, photoCount
 
     // ---------- Anexa 1 ----------
     { text: 'ANEXA 1 — PROCES-VERBAL DE PREDARE-PRIMIRE', style: 'title', fontSize: 13, pageBreak: 'before' },
+    { text: 'Partea 1: PREDARE — predarea autovehiculului către Locatar', alignment: 'center', bold: true, color: NAVY },
     {
       text: ['la Contractul nr. ', { text: String(nr), bold: true }, ' / ', { text: contractDate || blank(14), bold: true }],
       alignment: 'center',
@@ -390,41 +457,13 @@ export function buildContractDefinition({ rental, company: companyIn, photoCount
       signBlock(pj ? 'Locatar (primire), prin delegat:' : 'Locatar (primire):', rental.semnatura_locatar_predare, person.nume)
     ),
 
-    H('2. RETUR de la Locatar'),
-    P(['Data ', val(returnDate, 10), ' ora ', val(returned ? fmtTime(rental.data_returnare) : '', 6)]),
-    P([
-      'Km la bord: ', val(returned ? rental.km_primire : '', 10),
-      '   combustibil: ', val(returned ? fuelIn : '', 6), ' / 8',
-      '   Zile facturabile: ', val(returned ? rental.zile_facturabile ?? rentalDays(rental.data_predare, rental.data_returnare) : '', 6),
-    ]),
-    P(['Observații / avarii la retur: ', returned && has(rental.observatii_primire) ? val(rental.observatii_primire) : blank(60)]),
-    yesNo('Avarii noi:', returned ? Boolean(rental.avarii_noi) : null, returned && rental.avarii_noi ? '— detaliu: vezi observațiile' : `— detaliu: ${blank(36)}`),
-    P(['Dotări lipsă: ', returned ? (has(rental.dotari_lipsa) ? val(rental.dotari_lipsa) : { text: 'nu', bold: true }) : blank(60)]),
-    photoSet('Set foto retur:', photoCounts.primire || 0, returned && photosKnown),
-    yesNo(`Curățare autovehicul (${FEES.curatare} lei + TVA):`, returned ? Boolean(rental.taxa_curatare) : null),
-    yesNo(`Igienizare și dezodorizare (${FEES.igienizare} lei + TVA):`, returned ? Boolean(rental.taxa_igienizare) : null),
-    yesNo(
-      `Alimentare de către Locator (serviciu ${FEES.realimentare} lei + TVA, plus combustibil):`,
-      returned ? Boolean(rental.realimentare) : null,
-      returned && rental.realimentare && Number(rental.cost_combustibil) > 0 ? `— combustibil ${money(rental.cost_combustibil)} lei + TVA` : undefined
-    ),
-    twoColumns(
-      signBlock('Locator (retur):', rental.semnatura_locator_retur, company.reprezentant, returnDate),
-      signBlock(pj ? 'Locatar (predare înapoi), prin delegat:' : 'Locatar (predare înapoi):', rental.semnatura_locatar_retur, person.nume, returnDate)
-    ),
-    {
-      text: 'Anexa 1 face parte integrantă din contract. Predarea și returul se semnează pe loc, la datele de mai sus.',
-      fontSize: 7.5,
-      italics: true,
-      color: GRAY,
-      margin: [0, 4, 0, 0],
-    },
+    ...returnPage(true),
   ]
 
   return {
     pageSize: 'A4',
     pageMargins: [50, 44, 50, 44],
-    info: { title: `Contract ${nr} - ${clientName(client)}`, author: company.nume },
+    info: { title: `${onlyReturn ? 'Retur' : 'Contract'} ${nr} - ${clientName(client)}`, author: company.nume },
     defaultStyle: { font: 'Roboto', fontSize: 9.5, lineHeight: 1.15, color: TEXT },
     styles: {
       title: { fontSize: 14, bold: true, alignment: 'center', color: NAVY },
@@ -432,13 +471,15 @@ export function buildContractDefinition({ rental, company: companyIn, photoCount
       p: { margin: [0, 0, 0, 4], alignment: 'justify' },
     },
     footer: (page) => ({
-      text: [`${company.nume}  ·  pag. `, { text: String(page), bold: true }],
+      text: onlyReturn
+        ? `${company.nume}  ·  Anexa 1, partea a 2-a (retur) la contractul nr. ${has(rental.numar_contract) ? rental.numar_contract : '—'}`
+        : [`${company.nume}  ·  pag. `, { text: String(page), bold: true }],
       alignment: 'center',
       fontSize: 7,
       color: GRAY,
       margin: [0, 14, 0, 0],
     }),
-    content,
+    content: onlyReturn ? returnPage(false) : content,
   }
 }
 
@@ -643,6 +684,11 @@ function loadPdfMake() {
 
 export function contractPdfBlob(args) {
   return pdfBlob(buildContractDefinition(args))
+}
+
+// only Anexa 1, partea a 2-a (retur) — printed and signed at the return
+export function returnSheetPdfBlob(args) {
+  return pdfBlob(buildContractDefinition({ ...args, onlyReturn: true }))
 }
 
 export function returnReportPdfBlob(args) {
